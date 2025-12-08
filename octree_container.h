@@ -39,6 +39,7 @@ namespace OrthoTree
     using AD = typename OrthoTreeCore::AD;
 
     using TGeometry = typename OrthoTreeCore::TGeometry;
+    using FPGeometry = typename OrthoTreeCore::IGM::Geometry;
     using TVector = typename OrthoTreeCore::TVector;
     using TBox = typename OrthoTreeCore::TBox;
     using TRay = typename OrthoTreeCore::TRay;
@@ -343,6 +344,7 @@ namespace OrthoTree
     using AD = typename base::AD;
 
     using TGeometry = typename base::TGeometry;
+    using FPGeometry = typename OrthoTreeCore::IGM::Geometry;
     using TVector = typename base::TVector;
     using TBox = typename base::TBox;
     using TRay = typename base::TRay;
@@ -471,6 +473,7 @@ namespace OrthoTree
     using AD = typename base::AD;
 
     using TGeometry = typename base::TGeometry;
+    using FPGeometry = typename OrthoTreeCore::IGM::Geometry;
     using TVector = typename base::TVector;
     using TBox = typename base::TBox;
     using TRay = typename base::TRay;
@@ -572,17 +575,41 @@ namespace OrthoTree
 
 
   public: // Ray intersection
-    // Get all Box which is intersected by the ray in order
+    // Get all entities that are intersected by the ray in order
     inline std::vector<TEntityID> RayIntersectedAll(
       TVector const& rayBasePoint, TVector const& rayHeading, TGeometry tolerance, TGeometry maxDistance = std::numeric_limits<TGeometry>::max()) const noexcept
     {
       return this->m_tree.RayIntersectedAll(rayBasePoint, rayHeading, this->m_geometryCollection, tolerance, maxDistance);
     }
 
-    // Get first Box which is intersected by the ray
-    inline std::optional<TEntityID> RayIntersectedFirst(TVector const& rayBasePoint, TVector const& rayHeading, TGeometry tolerance) const noexcept
+    // Get all entities that are intersected by the ray in order
+    inline std::vector<TEntityID> RayIntersectedAll(
+      TRay const& ray, TGeometry tolerance, TGeometry maxDistance = std::numeric_limits<TGeometry>::max()) const noexcept
     {
-      return this->m_tree.RayIntersectedFirst(rayBasePoint, rayHeading, this->m_geometryCollection, tolerance);
+      return this->m_tree.RayIntersectedAll(ray, this->m_geometryCollection, tolerance, maxDistance);
+    }
+
+    // Get first entities that hit by the ray
+    inline std::vector<TEntityID> RayIntersectedFirst(
+      TVector const& rayBasePoint,
+      TVector const& rayHeading,
+      FPGeometry tolerance = {},
+      FPGeometry toleranceIncrement = {},
+      TGeometry maxDistance = std::numeric_limits<TGeometry>::max(),
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityHitTester = std::nullopt) const noexcept
+    {
+      return this->m_tree.RayIntersectedFirst(rayBasePoint, rayHeading, this->m_geometryCollection, tolerance, toleranceIncrement, maxDistance, entityHitTester);
+    }
+
+    // Get first entities that hit by the ray
+    inline std::vector<TEntityID> RayIntersectedFirst(
+      TRay const& ray,
+      FPGeometry tolerance = {},
+      FPGeometry toleranceIncrement = {},
+      TGeometry maxDistance = std::numeric_limits<TGeometry>::max(),
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityHitTester = std::nullopt) const noexcept
+    {
+      return this->m_tree.RayIntersectedFirst(ray, this->m_geometryCollection, tolerance, toleranceIncrement, maxDistance, entityHitTester);
     }
 
   public: // Plane

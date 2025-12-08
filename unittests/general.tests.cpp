@@ -4,6 +4,7 @@
 #include <charconv>
 #include <fstream>
 #include <random>
+#include <numbers>
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -960,7 +961,7 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::IsFalse(oid.has_value());
+      Assert::IsTrue(oid.empty());
     }
 
 
@@ -977,14 +978,14 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::IsFalse(oid.has_value());
+      Assert::IsTrue(oid.empty());
     }
 
 
     TEST_METHOD(RayIntersectedFirst__YRay2__None)
     {
       auto constexpr rayBase = Point2D{ 4.2, 4.4 };
-      auto constexpr rayHeading = Point2D{ 1.0, 1.0 };
+      auto constexpr rayHeading = Point2D{ std::numbers::sqrt2 * 0.5, std::numbers::sqrt2 * 0.5 };
       auto constexpr boxes = array
       {
         BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } },
@@ -994,14 +995,14 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::IsFalse(oid.has_value());
+      Assert::IsTrue(oid.empty());
     }
 
 
     TEST_METHOD(RayIntersectedFirst_InsideTheTree_Neg_None)
     {
       auto constexpr rayBase = Point2D{ 1.5, 2.6 };
-      auto constexpr rayHeading = Point2D{ -1.0, -1.0 };
+      auto constexpr rayHeading = Point2D{ std::numbers::sqrt2 * -0.5, std::numbers::sqrt2 * -0.5 };
       auto constexpr boxes = array
       {
         BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } },
@@ -1011,14 +1012,14 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::IsFalse(oid.has_value());
+      Assert::IsTrue(oid.empty());
     }
 
 
     TEST_METHOD(RayIntersectedFirst_OutsideTheTree_Neg_None)
     {
       auto constexpr rayBase = Point2D{ 7.0, 2.0 };
-      auto constexpr rayHeading = Point2D{ -1.0, -1.0 };
+      auto constexpr rayHeading = Point2D{ std::numbers::sqrt2 * -0.5, std::numbers::sqrt2 * -0.5 };
       auto constexpr boxes = array
       {
         BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } },
@@ -1028,8 +1029,9 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::IsFalse(oid.has_value());
+      Assert::IsTrue(oid.empty());
     }
+
 
     TEST_METHOD(RayIntersectedFirst__XRay__0)
     {
@@ -1044,7 +1046,8 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::AreEqual<EntityID>(0, oid.value());
+      Assert::AreEqual<size_t>(1, oid.size());
+      Assert::AreEqual<EntityID>(0, oid[0]);
     }
 
 
@@ -1061,7 +1064,9 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::AreEqual<EntityID>(1, oid.value());
+      Assert::AreEqual<size_t>(2, oid.size());
+      Assert::AreEqual<EntityID>(2, oid[0]);
+      Assert::AreEqual<EntityID>(1, oid[1]);
     }
 
 
@@ -1078,7 +1083,8 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::AreEqual<EntityID>(1, oid.value());
+      Assert::AreEqual<size_t>(1, oid.size());
+      Assert::AreEqual<EntityID>(1, oid[0]);
     }
 
 
@@ -1095,14 +1101,16 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::AreEqual<EntityID>(1, oid.value());
+      Assert::AreEqual<size_t>(2, oid.size());
+      Assert::AreEqual<EntityID>(0, oid[0]);
+      Assert::AreEqual<EntityID>(1, oid[1]);
     }
 
 
     TEST_METHOD(RayIntersectedFirst__XRayInsideTheTreeNeg__3)
     {
-      auto constexpr rayBase = Point2D{ 3.5, 3.5 };
-      auto constexpr rayHeading = Point2D{ -0.5, -1.0 };
+      auto const rayBase = Point2D{ 3.5, 3.5 };
+      auto const rayHeading = Point2D{ -1.0 / std::sqrt(5.0), -2.0 / std::sqrt(5.0) };
       auto constexpr boxes = array
       {
         BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } },
@@ -1112,14 +1120,113 @@ namespace GeneralTest
       };
       auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
       auto const oid = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0);
-      Assert::AreEqual<EntityID>(3, oid.value());
+      Assert::AreEqual<size_t>(1, oid.size());
+      Assert::AreEqual<EntityID>(3, oid[0]);
     }
 
+    TEST_METHOD(RayIntersectedFirst_MultipleHits_ReturnsReverseSorted)
+    {
+      auto constexpr rayBase = Point2D{ -1.0, 0.5 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 0.0, 0.0 }, { 5.0, 1.0 } }, // enter ~1.0
+        BoundingBox2D{ { 1.0, 0.0 }, { 3.0, 1.0 } }, // enter ~3.0
+        BoundingBox2D{ { 2.0, 0.0 }, { 4.0, 1.0 } }, // enter ~5.0
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+      auto const result = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0.0);
+
+      Assert::AreEqual<size_t>(3, result.size());
+      Assert::AreEqual((size_t)2, (size_t)result[0]);
+      Assert::AreEqual((size_t)1, (size_t)result[1]);
+      Assert::AreEqual((size_t)0, (size_t)result[2]);
+    }
+
+    TEST_METHOD(RayIntersectedFirst_Tolerance_AllowsGrazingHit)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 1.001 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 1.0, 0.0 }, { 2.0, 1.0 } }
+      };
+
+      auto const qt = QuadtreeBox(boxes, 1, std::nullopt, 1);
+
+      auto const result = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0.01);
+
+      Assert::AreEqual<size_t>(1, result.size());
+      Assert::AreEqual((size_t)0, (size_t)result[0]);
+    }
+
+    TEST_METHOD(RayIntersectedFirst_ToleranceIncrement_PrunesLaterHits)
+    {
+      auto constexpr rayBase = Point2D{ -1.0, 0.5 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{  { 0.0, 0.0 },  { 1.0, 1.0 } }, // hitDistance ~1
+        BoundingBox2D{ { 10.0, 0.0 }, { 11.0, 1.0 } }, // hitDistance ~11 -> prune
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      auto const result = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0.0, 0.5);
+
+      Assert::AreEqual<size_t>(1, result.size());
+      Assert::AreEqual((size_t)0, (size_t)result[0]);
+    }
+
+    TEST_METHOD(RayIntersectedFirst_MaxDistance_CutsOff)
+    {
+      auto constexpr rayBase = Point2D{ -1.0, 0.5 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{  { 0.0, 0.0 },  { 3.0, 1.0 } }, // enter ~1, exit 4
+        BoundingBox2D{  { 1.0, 0.0 },  { 2.0, 1.0 } }, // enter ~2, exit 3
+        BoundingBox2D{ { 10.0, 0.0 }, { 11.0, 1.0 } }, // enter ~11
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      auto const result = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0.0, 0.0, 5.0);
+
+      Assert::AreEqual<size_t>(2, result.size());
+      Assert::AreEqual((size_t)1, (size_t)result[0]);
+      Assert::AreEqual((size_t)0, (size_t)result[1]);
+    }
+
+    TEST_METHOD(RayIntersectedFirst_UserHitTest_FiltersEntity)
+    {
+      auto constexpr rayBase = Point2D{ -1.0, 0.5 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } },
+        BoundingBox2D{ { 2.0, 0.0 }, { 3.0, 1.0 } },
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      auto hitTest = [&](size_t id) -> std::optional<double> {
+        if (id == 0)
+          return std::nullopt; // [0] excluded
+
+        return 3.0;            // [1] distance
+      };
+
+      auto const result = qt.RayIntersectedFirst(rayBase, rayHeading, boxes, 0.0, 0.0, std::numeric_limits<double>::max(), hitTest);
+
+      Assert::AreEqual<size_t>(1, result.size());
+      Assert::AreEqual((size_t)1, (size_t)result[0]);
+    }
 
     TEST_METHOD(RayIntersectedAll_2D_General_234)
     {
       auto constexpr rayBase = Point2D{ 2.7, 2.6 };
-      auto constexpr rayHeading = Point2D{ 1.0, 1.0 };
+      auto constexpr rayHeading = Point2D{ std::numbers::sqrt2 * 0.5, std::numbers::sqrt2 * 0.5 };
 
       auto constexpr boxes = array
       {
@@ -1138,7 +1245,7 @@ namespace GeneralTest
     TEST_METHOD(RayIntersectedAll_2D_General_34)
     {
       auto constexpr rayBase = Point2D{ 2.6, 2.8 };
-      auto constexpr rayHeading = Point2D{ 1.0, 1.0 };
+      auto constexpr rayHeading = Point2D{ std::numbers::sqrt2 * 0.5, std::numbers::sqrt2 * 0.5 };
 
       auto constexpr boxes = array
       {
@@ -1157,7 +1264,7 @@ namespace GeneralTest
     TEST_METHOD(RayIntersectedAll_3D_General_34)
     {
       auto constexpr rayBase = Point3D{ 2.6, 2.8, 1.0 };
-      auto constexpr rayHeading = Point3D{ 1.0, 1.0, 1.0 };
+      auto constexpr rayHeading = Point3D{ std::numbers::inv_sqrt3, std::numbers::inv_sqrt3, std::numbers::inv_sqrt3 };
 
       auto constexpr boxes = array
       {
@@ -1177,7 +1284,8 @@ namespace GeneralTest
     {
       auto constexpr N = 5;
       auto constexpr rayBase = PointND<N>{ 2.6, 2.8, 1.0, 0.0, 0.0 };
-      auto constexpr rayHeading = PointND<N>{ 1.0, 1.0, 1.0, 1.0, 1.0 };
+      auto const rayHeading =
+        PointND<N>{ 1.0 / std::sqrt(5.0), 1.0 / std::sqrt(5.0), 1.0 / std::sqrt(5.0), 1.0 / std::sqrt(5.0), 1.0 / std::sqrt(5.0) };
 
       auto constexpr boxes = array
       {
@@ -1219,39 +1327,198 @@ namespace GeneralTest
         { 1.0, 0.0 }, // dir
         boxes,
         0.0); // it is on the edge of 1, inside 4, and hit 2
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, raySearchWithTolerance__0_000));
 
       auto const raySearchWithTolerance__0_001 = qt.RayIntersectedAll(
         { 0.000, 2.001 }, // origin
         { 1.0, 0.0 },    // dir
         boxes,
-        0.001); // ray hits 2,4
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 4 }, raySearchWithTolerance__0_001));
+        0.001 - std::numeric_limits<double>::epsilon()); // ray hits 2,4
 
       auto const raySearchWithTolerance__0_001_2 = qt.RayIntersectedAll(
         { 2.0005, 2.0 }, // origin
         { 1.0, 0.0 }, // dir
         boxes,
         0.001);
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, raySearchWithTolerance__0_001_2));
+      
+      auto const raySearchWithTolerance__0_899 = qt.RayIntersectedAll(
+        { 1.000, 1.9 }, // origin
+        { 1.0, 0.0 },   // dir
+        boxes,
+        0.899);
 
       auto const raySearchWithTolerance__0_900 = qt.RayIntersectedAll(
         { 1.000, 1.9 }, // origin
         { 1.0, 0.0 }, // dir
         boxes,
-        0.9);
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, raySearchWithTolerance__0_900));
+        0.9 - std::numeric_limits<double>::epsilon());
 
       auto const raySearchWithTolerance__0_901 = qt.RayIntersectedAll(
         { 1.000, 1.9 }, // origin
         { 1.0, 0.0 },   // dir
         boxes,
         0.901);
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2, 4 }, raySearchWithTolerance__0_901));
 
-      // TODO: Vertical
-      // TODO: Diagonal
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 4, 2 }, raySearchWithTolerance__0_000));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 4, 2 }, raySearchWithTolerance__0_001));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 4 }, raySearchWithTolerance__0_001_2));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 4, 2 }, raySearchWithTolerance__0_899));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 4, 2 }, raySearchWithTolerance__0_900));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 4, 2 }, raySearchWithTolerance__0_901));
     }
+
+    TEST_METHOD(RayIntersectedAll_ToleranceIncrement_AllowsHit)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 0.0 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      // The ray is epsilon-close to the box but missing without tolerance increment.
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ Point2D{ 1.0, 0.01 }, Point2D{ 2.0, 0.5 } }  // ID 0
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      // Zero tolerance -> no hit expected
+      {
+        auto const result = qt.RayIntersectedAll(
+          rayBase,
+          rayHeading,
+          boxes,
+          /*tolerance=*/0.0,
+          /*toleranceIncrement=*/0.0);
+        Assert::IsTrue(result.empty());
+      }
+
+      // Positive tolerance increment -> hit expected
+      {
+        auto const result = qt.RayIntersectedAll(
+          rayBase,
+          rayHeading,
+          boxes,
+          /*tolerance=*/0.0,
+          /*toleranceIncrement=*/0.01);
+        Assert::AreEqual<size_t>(1, result.size());
+        Assert::AreEqual<EntityID>(0, result[0]);
+      }
+    }
+
+    TEST_METHOD(RayIntersectedAll_MaxExaminationDistance_CutsResults)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 0.0 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{  Point2D{ 2.0, -1.0 },  Point2D{ 3.0, 1.0 } }, // ID 0, hit distance ~2
+        BoundingBox2D{ Point2D{ 10.0, -1.0 }, Point2D{ 11.0, 1.0 } }  // ID 1, hit distance ~10
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      // Distance limit < 10 -> only first hit expected
+      {
+        auto const result = qt.RayIntersectedAll(
+          rayBase,
+          rayHeading,
+          boxes,
+          /*tolerance=*/0.0,
+          /*toleranceIncrement=*/0.0,
+          /*maxExaminationDistance=*/5.0);
+        Assert::AreEqual<size_t>(1, result.size());
+        Assert::AreEqual<EntityID>(0, result[0]);
+      }
+
+      // Distance limit large -> both hits expected
+      {
+        auto const result = qt.RayIntersectedAll(rayBase, rayHeading, boxes, 0.0, 0.0, 100.0);
+        Assert::AreEqual<size_t>(2, result.size());
+        Assert::IsTrue(result[0] == 0 && result[1] == 1);
+      }
+    }
+    TEST_METHOD(RayIntersectedAll_EntityRayHitTester_FiltersIDs)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 0.0 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 1.0, -1.0 }, { 2.0, 1.0 } }, // ID 0
+        BoundingBox2D{ { 3.0, -1.0 }, { 4.0, 1.0 } }, // ID 1
+        BoundingBox2D{ { 5.0, -1.0 }, { 6.0, 1.0 } }, // ID 2
+      };
+
+      auto const qt = QuadtreeBox(boxes, 3, std::nullopt, 2);
+
+      auto tester = [&](EntityID id) -> std::optional<double> {
+        if (id == 1)
+          return 1.1;
+        else
+          return std::nullopt; // reject other IDs
+      };
+
+      auto const result = qt.RayIntersectedAll(
+        rayBase,
+        rayHeading,
+        boxes,
+        /*tolerance=*/0.0,
+        /*toleranceIncrement=*/0.0,
+        /*maxDistance=*/100.0,
+        tester);
+
+      Assert::AreEqual<size_t>(1, result.size());
+      Assert::AreEqual<EntityID>(1, result[0]);
+    }
+
+    TEST_METHOD(RayIntersectedAll_Split_NoSort)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 0.0 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 5.0, -1.0 }, { 6.0, 1.0 } }, // ID 0, far
+        BoundingBox2D{ { 2.0, -1.0 }, { 3.0, 1.0 } }, // ID 1, near
+        BoundingBox2D{ { 3.5, -1.0 }, { 4.0, 1.0 } }, // ID 2, mid
+        BoundingBox2D{ { 5.0, 2.0 }, { 6.0, 3.0 } }, // ID 2
+      };
+
+      auto const qt = QuadtreeBoxs<true>(boxes, 3, std::nullopt, 2);
+
+      auto const result = qt.RayIntersectedAll</*SHOULD_SORT_ENTITY_BY_DISTANCE=*/false>(
+        rayBase,
+        rayHeading,
+        boxes,
+        /*tolerance=*/0.0,
+        /*toleranceIncrement=*/0.0,
+        /*maxDistance=*/100.0);
+
+      Assert::AreEqual<size_t>(3, result.size());
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2 }, result));
+    }
+
+    TEST_METHOD(RayIntersectedAll_NoSplit_NoSort)
+    {
+      auto constexpr rayBase = Point2D{ 0.0, 0.0 };
+      auto constexpr rayHeading = Point2D{ 1.0, 0.0 };
+
+      auto constexpr boxes = std::array{
+        BoundingBox2D{ { 5.0, -1.0 }, { 6.0, 1.0 } }, // ID 0, far
+        BoundingBox2D{ { 2.0, -1.0 }, { 3.0, 1.0 } }, // ID 1, near
+        BoundingBox2D{ { 3.5, -1.0 }, { 4.0, 1.0 } }, // ID 2, mid
+        BoundingBox2D{  { 5.0, 2.0 }, { 6.0, 3.0 } }, // ID 2
+      };
+
+      auto const qt = QuadtreeBoxs<false>(boxes, 3, std::nullopt, 2);
+
+      auto const result = qt.RayIntersectedAll</*SHOULD_SORT_ENTITY_BY_DISTANCE=*/false>(
+        rayBase,
+        rayHeading,
+        boxes,
+        /*tolerance=*/0.0,
+        /*toleranceIncrement=*/0.0,
+        /*maxDistance=*/100.0);
+
+      Assert::AreEqual<size_t>(3, result.size());
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2 }, result));
+    }
+
   };
 }
 

@@ -76,8 +76,8 @@ ORTHOTREE_INDEX_T__INT / ORTHOTREE_INDEX_T__SIZE_T / ORTHOTREE_INDEX_T__UINT_FAS
 #include <span>
 #include <stack>
 #include <stdexcept>
-#include <tuple>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -168,6 +168,17 @@ namespace OrthoTree
 
   namespace detail
   {
+    template<typename T>
+    struct IsStdOptional : std::false_type
+    {};
+
+    template<typename U>
+    struct IsStdOptional<std::optional<U>> : std::true_type
+    {};
+
+    template<typename T>
+    inline constexpr bool IsStdOptionalV = IsStdOptional<T>::value;
+
     template<typename TContainer, typename TKey>
     concept HasAt = requires(TContainer container, TKey key) { container.at(key); };
 
@@ -288,6 +299,22 @@ namespace OrthoTree
       continer[key] = value;
     }
 
+    template<typename TContainer, typename TValue>
+    constexpr void insert(TContainer& container, TValue&& value)
+    {
+      if constexpr (requires { container.push_back(std::forward<TValue>(value)); })
+      {
+        container.push_back(std::forward<TValue>(value));
+      }
+      else if constexpr (requires { container.insert(std::forward<TValue>(value)); })
+      {
+        container.insert(std::forward<TValue>(value));
+      }
+      else
+      {
+        static_assert(sizeof(TContainer) == 0, "Insert: unsupported container type");
+      }
+    }
 
     struct pair_hash
     {
@@ -1813,6 +1840,147 @@ namespace OrthoTree
         }
         return volume;
       }
+
+      class BoxRayHitTester
+      {
+      public:
+        constexpr static std::optional<BoxRayHitTester> Make(
+          const TVector& origin, const TVector& normalizedDirection, Geometry minTolerance, Geometry toleranceIncrement)
+        {
+          if (!AD::IsNormalizedVector(normalizedDirection))
+          {
+            assert(false && "Normalized vector is required for Ray direction!");
+            return std::nullopt;
+          }
+
+          auto boxPickTester = std::optional<BoxRayHitTester>(std::in_place, BoxRayHitTester{});
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            boxPickTester->m_origin[dimensionID] = AD::GetPointC(origin, dimensionID);
+
+          boxPickTester->m_minTolerance = minTolerance;
+          boxPickTester->m_toleranceIncrement = toleranceIncrement;
+
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+          {
+            auto const nd = Geometry(AD::GetPointC(normalizedDirection, dimensionID));
+            auto const isNanCompnent = std::fabs(nd) < 2.0 * std::numeric_limits<Geometry>::epsilon();
+            boxPickTester->m_inverseDirection[dimensionID] = isNanCompnent ? std::numeric_limits<Geometry>::quiet_NaN() : (Geometry(1) / nd);
+            boxPickTester->m_signInfo.set(dimensionID, nd < 0);
+
+            boxPickTester->m_hasNaNComponent |= isNanCompnent;
+          }
+
+          return boxPickTester;
+        }
+
+        struct BoxPickResult
+        {
+          Geometry enterDistance, exitDistance;
+        };
+
+        template<bool isConeToleranceConsidered = true>
+        constexpr std::optional<BoxPickResult> Hit(const Vector& center, const Vector& halfSize) const noexcept
+        {
+          Vector minDifference, maxDifference;
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            minDifference[dimensionID] = center[dimensionID] - halfSize[dimensionID] - m_origin[dimensionID];
+
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            maxDifference[dimensionID] = center[dimensionID] + halfSize[dimensionID] - m_origin[dimensionID];
+
+          return HitTest<isConeToleranceConsidered>(minDifference, maxDifference);
+        }
+
+        template<bool isConeToleranceConsidered = true>
+        constexpr std::optional<BoxPickResult> Hit(const TBox& box) const noexcept
+        {
+          Vector minDifference, maxDifference;
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            minDifference[dimensionID] = AD::GetBoxMinC(box, dimensionID) - m_origin[dimensionID];
+
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            maxDifference[dimensionID] = AD::GetBoxMaxC(box, dimensionID) - m_origin[dimensionID];
+
+          return HitTest<isConeToleranceConsidered>(minDifference, maxDifference);
+        }
+
+      private:
+        constexpr BoxRayHitTester() = default;
+
+        template<bool isConeToleranceConsidered = true>
+        constexpr std::optional<BoxPickResult> HitTest(const Vector& minDifference, const Vector& maxDifference) const
+        {
+          // plane distances
+          std::array<Vector, 2> pd;
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            pd[0][dimensionID] = minDifference[dimensionID] * m_inverseDirection[dimensionID];
+
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            pd[1][dimensionID] = maxDifference[dimensionID] * m_inverseDirection[dimensionID];
+
+          // NaN is eliminated in std::fmax/fmin, and returns the non-NaN.
+          std::optional pickResult =
+            BoxPickResult{ .enterDistance = -std::numeric_limits<Geometry>::max(), .exitDistance = std::numeric_limits<Geometry>::max() };
+
+          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+          {
+            pickResult->enterDistance = std::fmax(pickResult->enterDistance, pd[m_signInfo[dimensionID]][dimensionID]);
+            pickResult->exitDistance = std::fmin(pickResult->exitDistance, pd[1 - m_signInfo[dimensionID]][dimensionID]);
+          }
+
+          auto exitTolerance = Geometry{};
+          if constexpr (isConeToleranceConsidered)
+          {
+            exitTolerance = std::fmax(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance;
+
+            pickResult->enterDistance -= Geometry(0.5) * (std::fmax(Geometry(0), pickResult->enterDistance) * m_toleranceIncrement + m_minTolerance);
+            pickResult->exitDistance += Geometry(0.5) * (std::fmax(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance);
+          }
+          else
+          { // Numerical inaccuracies could cause false-miss
+            exitTolerance = Geometry(0.5) * std::fmax(Geometry(1), pickResult->exitDistance) * std::numeric_limits<Geometry>::epsilon();
+
+            pickResult->enterDistance -= exitTolerance;
+            pickResult->exitDistance += exitTolerance;
+          }
+
+          // Only real, ray-direction hit is allowed
+          if (pickResult->enterDistance >= pickResult->exitDistance || pickResult->exitDistance <= Geometry(0))
+          {
+            pickResult = std::nullopt;
+            return pickResult;
+          }
+
+          // Ray origin inside the box case
+          pickResult->enterDistance = std::fmax(Geometry(0), pickResult->enterDistance);
+
+          // Handle zero direction components
+          if (m_hasNaNComponent)
+          {
+            for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+            {
+              if (!std::isnan(m_inverseDirection[dimensionID]))
+                continue;
+
+              if (minDifference[dimensionID] > exitTolerance || maxDifference[dimensionID] < -exitTolerance)
+              {
+                pickResult.reset();
+                return pickResult;
+              }
+            }
+          }
+
+          return pickResult;
+        }
+
+      private:
+        Vector m_origin;
+        Vector m_inverseDirection;
+        Geometry m_minTolerance;
+        Geometry m_toleranceIncrement;
+        std::bitset<DIMENSION_NO> m_signInfo;
+        bool m_hasNaNComponent = false;
+      };
     };
 
 
@@ -3428,6 +3596,59 @@ namespace OrthoTree
         VisitNodesInDFS(childKey, procedure, selector);
     }
 
+    void VisitNodeInPriorityOrder(MortonNodeIDCR rootNodeID, auto&& procedure, auto&& priorityCalculator) const noexcept
+    {
+      using TPriorityResult = std::invoke_result_t<decltype(priorityCalculator), Node>;
+      using TPriority = std::conditional_t<detail::IsStdOptionalV<TPriorityResult>, typename TPriorityResult::value_type, TPriorityResult>;
+
+      auto constexpr GetValue = [](TPriorityResult const& pr) noexcept -> TPriority {
+        if constexpr (detail::IsStdOptionalV<TPriorityResult>)
+          return *pr;
+        else
+          return pr;
+      };
+
+      struct PrioritizedNode
+      {
+        MortonNodeID nodeID;
+        TPriority priority;
+
+        constexpr auto operator<=>(PrioritizedNode const& other) const noexcept { return priority <=> other.priority; }
+      };
+
+      auto nodePriority = priorityCalculator(this->GetNode(rootNodeID));
+      if constexpr (detail::IsStdOptionalV<TPriorityResult>)
+      {
+        if (!nodePriority)
+          return;
+      }
+
+
+      auto nodesToProceed = std::priority_queue<PrioritizedNode, std::vector<PrioritizedNode>, std::greater<PrioritizedNode>>();
+      nodesToProceed.push({ rootNodeID, GetValue(nodePriority) });
+      while (!nodesToProceed.empty())
+      {
+        auto const [nodeID, priority] = nodesToProceed.top();
+        nodesToProceed.pop();
+
+        if (!procedure(this->GetNodeEntities(nodeID), priority))
+          return;
+
+        auto const& node = GetNode(nodeID);
+        for (MortonNodeIDCR childNodeID : node.GetChildren())
+        {
+          auto childNodePriority = priorityCalculator(this->GetNode(childNodeID));
+
+          if constexpr (detail::IsStdOptionalV<TPriorityResult>)
+          {
+            if (!childNodePriority)
+              continue;
+          }
+
+          nodesToProceed.push({ childNodeID, GetValue(childNodePriority) });
+        }
+      }
+    }
 
     // Collect all item id, traversing the tree in breadth-first search order
     std::vector<TEntityID> CollectAllEntitiesInBFS(MortonNodeIDCR rootKey = SI::GetRootKey(), bool shouldSortInsideNodes = false) const noexcept
@@ -3902,12 +4123,11 @@ namespace OrthoTree
     using Base = OrthoTreeBase<DIMENSION_NO, TVector_, TVector_, TBox_, TRay_, TPlane_, TGeometry_, TAdapter_, TContainer_>;
     using EntityDistance = typename Base::EntityDistance;
     using BoxDistance = typename Base::BoxDistance;
-    using IGM = typename Base::IGM;
-    using IGM_Geometry = typename IGM::Geometry;
 
   public:
     using AD = typename Base::AD;
     using SI = typename Base::SI;
+    using IGM = typename Base::IGM;
     using MortonLocationID = typename Base::MortonLocationID;
     using MortonLocationIDCR = typename Base::MortonLocationIDCR;
     using MortonNodeID = typename Base::MortonNodeID;
@@ -3917,6 +4137,7 @@ namespace OrthoTree
     using Node = typename Base::Node;
 
     using TGeometry = TGeometry_;
+    using IGM_Geometry = typename IGM::Geometry;
     using TVector = TVector_;
     using TBox = TBox_;
     using TRay = TRay_;
@@ -4420,12 +4641,11 @@ namespace OrthoTree
     using BoxDistance = typename Base::BoxDistance;
     template<typename T>
     using DimArray = std::array<T, DIMENSION_NO>;
-    using IGM = typename Base::IGM;
-    using IGM_Geometry = typename IGM::Geometry;
 
   public:
     using AD = typename Base::AD;
     using SI = typename Base::SI;
+    using IGM = typename Base::IGM;
     using MortonLocationID = typename Base::MortonLocationID;
     using MortonLocationIDCR = typename Base::MortonLocationIDCR;
     using MortonNodeID = typename Base::MortonNodeID;
@@ -4435,6 +4655,7 @@ namespace OrthoTree
     using Node = typename Base::Node;
 
     using TGeometry = TGeometry_;
+    using IGM_Geometry = typename IGM::Geometry;
     using TVector = TVector_;
     using TBox = TBox_;
     using TRay = TRay_;
@@ -5573,135 +5794,241 @@ namespace OrthoTree
       depth_t depthID,
       MortonNodeIDCR parentKey,
       TContainer const& boxes,
-      TVector const& rayBasePoint,
-      TVector const& rayHeading,
-      TGeometry tolerance,
+      IGM::BoxRayHitTester const& boxRayHitTester,
       TGeometry maxExaminationDistance,
-      std::vector<EntityDistance>& foundEntities) const noexcept
+      const std::optional<std::function<std::optional<TGeometry>(TEntityID)>>& entityRayHitTester,
+      auto& foundEntities) const noexcept
     {
       auto const& node = this->GetNode(parentKey);
 
-      auto const isNodeHit =
-        IGM::GetRayBoxDistanceAD(GetNodeCenterMacro(this, parentKey, node), this->GetNodeSize(depthID + 1), rayBasePoint, rayHeading, tolerance);
-      if (!isNodeHit)
+      auto const nodeHit = boxRayHitTester.Hit(GetNodeCenterMacro(this, parentKey, node), this->GetNodeSize(depthID + 1));
+      if (!nodeHit)
         return;
 
       for (auto const entityID : this->GetNodeEntities(node))
       {
-        auto const entityDistance = AD::GetRayBoxDistance(detail::at(boxes, entityID), rayBasePoint, rayHeading, tolerance);
-        if (entityDistance && (maxExaminationDistance == 0 || entityDistance.value() <= maxExaminationDistance))
-          foundEntities.push_back({ { IGM_Geometry(entityDistance.value()) }, entityID });
+        auto const entityDistance = boxRayHitTester.Hit(detail::at(boxes, entityID));
+        if (entityDistance && (maxExaminationDistance == 0 || entityDistance->enterDistance <= maxExaminationDistance))
+        {
+          auto closestEntityDistance = entityDistance->enterDistance;
+          if (entityRayHitTester)
+          {
+            const auto result = (*entityRayHitTester)(entityID);
+            if (!result)
+              continue;
+
+            closestEntityDistance = *result;
+          }
+          using ValueType = typename std::decay_t<decltype(foundEntities)>::value_type;
+          if constexpr (std::is_same_v<ValueType, TEntityID>)
+            detail::insert(foundEntities, entityID);
+          else
+            detail::insert(foundEntities, EntityDistance{ { closestEntityDistance }, entityID });
+        }
       }
 
       ++depthID;
       for (MortonNodeIDCR childKey : node.GetChildren())
-        GetRayIntersectedAllRecursive(depthID, childKey, boxes, rayBasePoint, rayHeading, tolerance, maxExaminationDistance, foundEntities);
+        GetRayIntersectedAllRecursive(depthID, childKey, boxes, boxRayHitTester, maxExaminationDistance, entityRayHitTester, foundEntities);
     }
 
-
-    void GetRayIntersectedFirstRecursive(
-      depth_t depthID,
-      Node const& parentNode,
-      TContainer const& boxes,
-      TVector const& rayBasePoint,
-      TVector const& rayHeading,
-      TGeometry tolerance,
-      std::optional<EntityDistance>& foundEntity) const noexcept
+    struct EntityDistanceHash
     {
-      for (auto const entityID : this->GetNodeEntities(parentNode))
-      {
-        auto const distance = AD::GetRayBoxDistance(detail::at(boxes, entityID), rayBasePoint, rayHeading, tolerance);
-        if (!distance)
-          continue;
+      constexpr size_t operator()(EntityDistance const& v) const noexcept { return std::hash<TEntityID>{}(v.EntityID); }
+    };
 
-        if (!foundEntity || foundEntity->Distance > *distance)
-          foundEntity = std::optional<EntityDistance>(std::in_place, EntityDistance{ { TGeometry(*distance) }, entityID });
-      }
-
-      ++depthID;
-      auto const& halfSize = this->GetNodeSize(depthID + 1);
-      auto nodeDistances = std::vector<BoxDistance>();
-      for (MortonNodeIDCR childKey : parentNode.GetChildren())
-      {
-        auto const& nodeChild = this->GetNode(childKey);
-        auto const distance = IGM::GetRayBoxDistanceAD(GetNodeCenterMacro(this, childKey, nodeChild), halfSize, rayBasePoint, rayHeading, tolerance);
-        if (!distance)
-          continue;
-
-        if (foundEntity && *distance > foundEntity->Distance)
-          continue;
-
-        nodeDistances.push_back({ { IGM_Geometry(distance.value()) }, childKey, &nodeChild });
-      }
-
-      std::sort(nodeDistances.begin(), nodeDistances.end());
-
-      for (auto const& nodeDistance : nodeDistances)
-      {
-        if (foundEntity && nodeDistance.Distance - tolerance >= foundEntity->Distance)
-          break;
-
-        GetRayIntersectedFirstRecursive(depthID, *nodeDistance.NodePtr, boxes, rayBasePoint, rayHeading, tolerance, foundEntity);
-      }
-    }
-
+    struct EntityDistanceEq
+    {
+      constexpr bool operator()(EntityDistance const& a, EntityDistance const& b) const noexcept { return a.EntityID == b.EntityID; }
+    };
 
   public:
-    // Get all box which is intersected by the ray in order
+    // Get all entities that are intersected by the ray in order
+    template<bool SHOULD_SORT_ENTITY_BY_DISTANCE = true>
     std::vector<TEntityID> RayIntersectedAll(
-      TVector const& rayBasePointPoint,
+      TVector const& rayBasePoint,
       TVector const& rayHeading,
       TContainer const& boxes,
-      TGeometry tolerance = {},
-      TGeometry maxExaminationDistance = {}) const noexcept
+      IGM::Geometry tolerance = {},
+      IGM::Geometry toleranceIncrement = {},
+      TGeometry maxExaminationDistance = {},
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityRayHitTester = std::nullopt) const noexcept
     {
-      auto foundEntities = std::vector<EntityDistance>();
+      const auto boxRayHitTester = IGM::BoxRayHitTester::Make(rayBasePoint, rayHeading, tolerance, toleranceIncrement);
+      if (!boxRayHitTester)
+        return {};
+
+      using UniqueEntityDistanceContainer = std::conditional_t<
+        SHOULD_SORT_ENTITY_BY_DISTANCE,
+        std::conditional_t<DO_SPLIT_PARENT_ENTITIES, std::unordered_set<EntityDistance, EntityDistanceHash, EntityDistanceEq>, std::vector<EntityDistance>>,
+        std::conditional_t<DO_SPLIT_PARENT_ENTITIES, std::unordered_set<TEntityID>, std::vector<TEntityID>>>;
+
+      auto foundEntities = UniqueEntityDistanceContainer{};
       foundEntities.reserve(20);
-      GetRayIntersectedAllRecursive(0, SI::GetRootKey(), boxes, rayBasePointPoint, rayHeading, tolerance, maxExaminationDistance, foundEntities);
+      GetRayIntersectedAllRecursive(0, SI::GetRootKey(), boxes, *boxRayHitTester, maxExaminationDistance, entityRayHitTester, foundEntities);
 
-      auto const beginIteratorOfEntities = foundEntities.begin();
-      auto endIteratorOfEntities = foundEntities.end();
-      std::sort(beginIteratorOfEntities, endIteratorOfEntities);
-      if constexpr (DO_SPLIT_PARENT_ENTITIES)
-        endIteratorOfEntities =
-          std::unique(beginIteratorOfEntities, endIteratorOfEntities, [](auto const& lhs, auto const& rhs) { return lhs.EntityID == rhs.EntityID; });
+      if constexpr (!SHOULD_SORT_ENTITY_BY_DISTANCE && !DO_SPLIT_PARENT_ENTITIES)
+      {
+        return foundEntities;
+      }
+      else if constexpr (SHOULD_SORT_ENTITY_BY_DISTANCE && DO_SPLIT_PARENT_ENTITIES)
+      {
+        std::vector<EntityDistance> sortedEntities;
+        sortedEntities.reserve(foundEntities.size());
+        for (auto const& e : foundEntities)
+          sortedEntities.push_back(e);
 
-      auto foundEntityIDs = std::vector<TEntityID>(std::distance(beginIteratorOfEntities, endIteratorOfEntities));
-      std::transform(beginIteratorOfEntities, endIteratorOfEntities, foundEntityIDs.begin(), [](auto const& entityDistance) {
-        return entityDistance.EntityID;
-      });
-      return foundEntityIDs;
+        std::sort(sortedEntities.begin(), sortedEntities.end());
+
+        auto foundEntityIDs = std::vector<TEntityID>(sortedEntities.size());
+        std::transform(sortedEntities.begin(), sortedEntities.end(), foundEntityIDs.begin(), [](auto const& entityDistance) {
+          return entityDistance.EntityID;
+        });
+        return foundEntityIDs;
+      }
+      else
+      {
+        auto const beginIteratorOfEntities = foundEntities.begin();
+        auto const endIteratorOfEntities = foundEntities.end();
+        if constexpr (SHOULD_SORT_ENTITY_BY_DISTANCE)
+        {
+          std::sort(beginIteratorOfEntities, endIteratorOfEntities);
+
+          auto foundEntityIDs = std::vector<TEntityID>(foundEntities.size());
+          std::transform(beginIteratorOfEntities, endIteratorOfEntities, foundEntityIDs.begin(), [](auto const& entityDistance) {
+            return entityDistance.EntityID;
+          });
+          return foundEntityIDs;
+        }
+        else
+        {
+          auto foundEntityIDs = std::vector<TEntityID>(foundEntities.size());
+          std::transform(beginIteratorOfEntities, endIteratorOfEntities, foundEntityIDs.begin(), [](auto const entityID) { return entityID; });
+          return foundEntityIDs;
+        }
+      }
     }
 
     // Get all box which is intersected by the ray in order
     inline std::vector<TEntityID> RayIntersectedAll(
       TRay const& ray, TContainer const& boxes, TGeometry tolerance = {}, TGeometry maxExaminationDistance = {}) const noexcept
     {
-      return RayIntersectedAll(ray.Origin, ray.Direction, boxes, tolerance, maxExaminationDistance);
+      return RayIntersectedAll(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), boxes, tolerance, maxExaminationDistance);
     }
 
-    // Get first box which is intersected by the ray
-    std::optional<TEntityID> RayIntersectedFirst(
-      TVector const& rayBasePoint, TVector const& rayHeading, TContainer const& boxes, TGeometry tolerance = {}) const noexcept
+    // Get first entities that hit by the ray
+    std::vector<TEntityID> RayIntersectedFirst(
+      TVector const& rayBasePoint,
+      TVector const& rayHeading,
+      TContainer const& boxes,
+      IGM::Geometry tolerance = {},
+      IGM::Geometry toleranceIncrement = {},
+      TGeometry maxDistance = std::numeric_limits<TGeometry>::max(),
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityRayHitTester = std::nullopt) const noexcept
     {
-      auto const& rootNode = this->GetNode(SI::GetRootKey());
-      auto const distance =
-        IGM::GetRayBoxDistanceAD(GetNodeCenterMacro(this, SI::GetRootKey(), rootNode), this->GetNodeSize(1), rayBasePoint, rayHeading, tolerance);
-      if (!distance)
-        return std::nullopt;
+      const auto boxRayHitTester = IGM::BoxRayHitTester::Make(rayBasePoint, rayHeading, tolerance, toleranceIncrement);
+      if (!boxRayHitTester)
+        return {};
 
-      auto foundEntity = std::optional<EntityDistance>{};
-      GetRayIntersectedFirstRecursive(0, rootNode, boxes, rayBasePoint, rayHeading, tolerance, foundEntity);
-      if (!foundEntity)
-        return std::nullopt;
+      struct Candidate
+      {
+        TEntityID entityID;
+        TGeometry enterDistance;
 
-      return foundEntity->EntityID;
+        constexpr auto operator<=>(Candidate const& other) const noexcept { return enterDistance <=> other.enterDistance; }
+      };
+
+      const auto appliedTolerance = tolerance == 0 ? std::numeric_limits<TGeometry>::epsilon() : tolerance;
+
+      // max-heap by enterDistance (largest enterDistance at top)
+      auto maxDistanceHeap = std::priority_queue<Candidate, std::vector<Candidate>>{};
+      auto maxExaminationDistance = IGM_Geometry(maxDistance);
+      this->VisitNodeInPriorityOrder(
+        SI::GetRootKey(),
+        [&, boxPicker = *boxRayHitTester](const auto& nodeEntities, TGeometry nodeEnterDistance) {
+          if (nodeEnterDistance > maxExaminationDistance)
+            return false;
+
+          for (auto const entityID : nodeEntities)
+          {
+            auto boxResult = boxPicker.Hit(detail::at(boxes, entityID));
+            if (!boxResult)
+              continue;
+
+            if (boxResult->enterDistance > maxExaminationDistance)
+              continue;
+
+            // furthest possible hit distance
+            auto& [closestHitDistance, furthestPossibleHitDistance] = *boxResult;
+            if (entityRayHitTester)
+            {
+              auto const result = (*entityRayHitTester)(entityID);
+              if (!result)
+                continue;
+
+              assert(*result <= furthestPossibleHitDistance && "entityRayHitTester returned out of box result.");
+              assert(*result >= closestHitDistance && "entityRayHitTester returned out of box result.");
+              closestHitDistance = furthestPossibleHitDistance = *result;
+            }
+
+            // push candidate
+            maxDistanceHeap.push(Candidate{ entityID, closestHitDistance });
+
+            // update bestExitDistance if this entity's exit is closer
+            if (furthestPossibleHitDistance >= maxExaminationDistance)
+              continue;
+
+            maxExaminationDistance = (TGeometry(1) + toleranceIncrement) * furthestPossibleHitDistance + appliedTolerance;
+
+            // drop any candidates whose enterDistance > new maxExaminationDistance
+            while (!maxDistanceHeap.empty() && maxDistanceHeap.top().enterDistance > maxExaminationDistance)
+              maxDistanceHeap.pop();
+          }
+
+          return true;
+        },
+        [&, boxPicker = *boxRayHitTester](auto const& node) -> std::optional<TGeometry> {
+          auto result = boxPicker.Hit(GetNodeCenterMacro(this, node.GetKey(), node), this->GetNodeSize(SI::GetDepthID(node.GetKey()) + 1));
+          if (!result)
+            return std::nullopt;
+
+          return result->enterDistance;
+        });
+
+      std::vector<TEntityID> resultEntityIDs;
+      resultEntityIDs.reserve(maxDistanceHeap.size());
+      if constexpr (DO_SPLIT_PARENT_ENTITIES)
+      {
+        std::unordered_set<TEntityID> uniqueEntities;
+        uniqueEntities.reserve(maxDistanceHeap.size());
+        for (; !maxDistanceHeap.empty(); maxDistanceHeap.pop())
+        {
+          auto entityID = maxDistanceHeap.top().entityID;
+
+          auto [_, isNew] = uniqueEntities.insert(entityID);
+          if (isNew)
+            resultEntityIDs.push_back(entityID);
+        }
+      }
+      else
+      {
+        for (; !maxDistanceHeap.empty(); maxDistanceHeap.pop())
+          resultEntityIDs.push_back(maxDistanceHeap.top().entityID);
+      }
+
+      return resultEntityIDs;
     }
 
-    // Get first box which is intersected by the ray
-    inline std::optional<TEntityID> RayIntersectedFirst(TRay const& ray, TContainer const& boxes, TGeometry tolerance = {}) const noexcept
+    // Get first entities that hit by the ray
+    std::vector<TEntityID> RayIntersectedFirst(
+      TRay const& ray,
+      TContainer const& boxes,
+      IGM::Geometry tolerance = {},
+      IGM::Geometry toleranceIncrement = {},
+      TGeometry maxDistance = std::numeric_limits<TGeometry>::max(),
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityHitTester = std::nullopt) const noexcept
     {
-      return RayIntersectedFirst(ray.Origin, ray.Direction, boxes, tolerance);
+      return RayIntersectedFirst(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), boxes, tolerance, toleranceIncrement, maxDistance, entityHitTester);
     }
   };
 

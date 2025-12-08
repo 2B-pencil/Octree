@@ -273,9 +273,9 @@ namespace AdaptorTest
 
         // Ray intersections
         auto rayBasePoint = Eigen::Vector2d(1.5, 2.5);
-        auto rayHeading = Eigen::Vector2d(1.5, 0.5);
-        auto firstIntersectedBox = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01); //: 4
-        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01); //: { 4, 2, 3 } in distance order!
+        auto rayHeading = Eigen::Vector2d(3.0 / std::sqrt(10.0), 1.0 / std::sqrt(10.0));
+        auto firstIntersectedBoxes = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01); //: {2, 4}
+        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01); //: { 2, 3, 4 } in distance order!
 
         // Plane       
         auto sqrt2 = sqrt(2.0);
@@ -300,12 +300,13 @@ namespace AdaptorTest
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{1, 2, 4}, insideBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{1, 2, 3, 4}, overlappingBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{2, 4}, pickedIDs));
-        Assert::IsTrue(firstIntersectedBox.has_value());
-        Assert::AreEqual(EntityID(4), *firstIntersectedBox);
+        Assert::AreEqual<size_t>(2, firstIntersectedBoxes.size());
+        Assert::AreEqual(EntityID(2), firstIntersectedBoxes[0]);
+        Assert::AreEqual(EntityID(4), firstIntersectedBoxes[1]);
 
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, boxesInFrustum));
 
-        Assert::IsTrue(vector<EntityID>{ 4, 2, 3 } == intersectedPoints);
+        Assert::IsTrue(vector<EntityID>{ 2, 3, 4 } == intersectedPoints);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInDFS);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInBFS);
       }
@@ -421,9 +422,9 @@ namespace AdaptorTest
 
         // Ray intersections
         auto rayBasePoint = BasicTypesXYZ::Point2D{ 1.5f, 2.5f };
-        auto rayHeading = BasicTypesXYZ::Point2D{ 1.5f, 0.5f };
-        auto firstIntersectedBox = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01f); //: 4
-        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01f); //: { 4, 2, 3 } in distance order!
+        auto rayHeading = BasicTypesXYZ::Point2D{ 3.0f / std::sqrtf(10.0f), 1.0f / std::sqrt(10.0f) };
+        auto firstIntersectedBoxes = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01f); //: { 2, 4 }
+        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01f); //: { 2, 3, 4 } in distance order!
 
         // Plane
         auto sqrt2 = sqrtf(2.0);
@@ -448,12 +449,13 @@ namespace AdaptorTest
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{1, 2, 4}, insideBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{1, 2, 3, 4}, overlappingBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{2, 4}, pickedIDs));
-        Assert::IsTrue(firstIntersectedBox.has_value());
-        Assert::AreEqual(EntityID(4), *firstIntersectedBox);
+        Assert::AreEqual<size_t>(2, firstIntersectedBoxes.size());
+        Assert::AreEqual(EntityID(2), firstIntersectedBoxes[0]);
+        Assert::AreEqual(EntityID(4), firstIntersectedBoxes[1]);
 
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, boxesInFrustum));
 
-        Assert::IsTrue(vector<EntityID>{ 4, 2, 3 } == intersectedPoints);
+        Assert::IsTrue(vector<EntityID>{ 2, 3, 4 } == intersectedPoints);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInDFS);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInBFS);
       }
@@ -689,9 +691,9 @@ namespace AdaptorTest
 
         // Ray intersections
         auto rayBasePoint = std::make_unique<MyPoint2DConcrete1>( 1.5f, 2.5f );
-        auto rayHeading = MyPoint2DConcrete1( 1.5f, 0.5f );
-        auto firstIntersectedBox = quadtree.RayIntersectedFirst(rayBasePoint.get(), &rayHeading, 0.01f); //: 4
-        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint.get(), &rayHeading, 0.01f);     //: { 4, 2, 3 } in distance order!
+        auto rayHeading = MyPoint2DConcrete1(3.0f / std::sqrtf(10.0f), 1.0f / std::sqrtf(10.0f));
+        auto firstIntersectedBoxes = quadtree.RayIntersectedFirst(rayBasePoint.get(), &rayHeading, 0.01f); //: {2, 4}
+        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint.get(), &rayHeading, 0.01f);     //: { 2, 3, 4 } in distance order!
 
         // Plane
         auto sqrt2 = sqrtf(2.0);
@@ -719,12 +721,13 @@ namespace AdaptorTest
         Assert::IsTrue(std::ranges::is_permutation(std::vector<EntityID>{ 1, 2, 4 }, insideBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(std::vector<EntityID>{ 1, 2, 3, 4 }, overlappingBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(std::vector<EntityID>{ 2, 4 }, pickedIDs));
-        Assert::IsTrue(firstIntersectedBox.has_value());
-        Assert::AreEqual(EntityID(4), *firstIntersectedBox);
+        Assert::AreEqual<size_t>(2, firstIntersectedBoxes.size());
+        Assert::AreEqual(EntityID(2), firstIntersectedBoxes[0]);
+        Assert::AreEqual(EntityID(4), firstIntersectedBoxes[1]);
 
         Assert::IsTrue(std::ranges::is_permutation(std::vector<EntityID>{ 1, 2, 4 }, boxesInFrustum));
 
-        Assert::IsTrue(std::vector<EntityID>{ 4, 2, 3 } == intersectedPoints);
+        Assert::IsTrue(std::vector<EntityID>{ 2, 3, 4 } == intersectedPoints);
         Assert::IsTrue(std::vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInDFS);
         Assert::IsTrue(std::vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInBFS);
       }
@@ -818,7 +821,7 @@ namespace AdaptorTest
 
         // Ray intersections
         auto rayBasePoint = FVector2D( 1.5, 2.5 );
-        auto rayHeading = FVector2D( 1.5, 0.5 );
+        auto rayHeading = FVector2D(3.0 / std::sqrt(10.0), 1.0 / std::sqrt(10.0));
         auto firstIntersectedBox = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01); //: 4
         auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01); //: { 4, 2, 3 } in distance order!
 
@@ -948,9 +951,9 @@ namespace AdaptorTest
 
         // Ray intersections
         auto rayBasePoint = point_t(1.5, 2.5);
-        auto rayHeading = point_t(1.5, 0.5);
-        auto firstIntersectedBox = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01); //: 4
-        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01); //: { 4, 2, 3 } in distance order!
+        auto rayHeading = point_t(3.0 / std::sqrt(10.0), 1.0 / std::sqrt(10.0));
+        auto firstIntersectedBoxes = quadtree.RayIntersectedFirst(rayBasePoint, rayHeading, 0.01); //: {2, 4}
+        auto intersectedPoints = quadtree.RayIntersectedAll(rayBasePoint, rayHeading, 0.01); //: { 2, 3, 4 } in distance order!
         auto sqrt2 = sqrtf(2.0);
         auto sqrt2Reciproc = 1.0f / sqrt2;
         auto boxesInFrustum = quadtree.FrustumCulling( // Cross-point of the planes: 2;2;2
@@ -973,12 +976,13 @@ namespace AdaptorTest
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, insideBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 3, 4 }, overlappingBoxIDs));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 4 }, pickedIDs));
-        Assert::IsTrue(firstIntersectedBox.has_value());
-        Assert::AreEqual(EntityID(4), *firstIntersectedBox);
+        Assert::AreEqual<size_t>(2, firstIntersectedBoxes.size());
+        Assert::AreEqual(EntityID(2), firstIntersectedBoxes[0]);
+        Assert::AreEqual(EntityID(4), firstIntersectedBoxes[1]);
 
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 2, 4 }, boxesInFrustum));
 
-        Assert::IsTrue(vector<EntityID>{ 4, 2, 3 } == intersectedPoints);
+        Assert::IsTrue(vector<EntityID>{ 2, 3, 4 } == intersectedPoints);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInDFS);
         Assert::IsTrue(vector<EntityID>{ 4, 0, 1, 2, 3 } == entityIDsInBFS);
       }

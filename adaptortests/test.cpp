@@ -372,6 +372,7 @@ namespace
   struct BoxTestInputT
   {
     using TGeometry = typename TOrthoTreeA::TGeometry;
+    using TFPGeometry = typename TOrthoTreeA::FPGeometry;
     using TVector = typename TOrthoTreeA::TVector;
     using TBox = typename TOrthoTreeA::TBox;
     using TRay = typename TOrthoTreeA::TRay;
@@ -416,7 +417,7 @@ namespace
     };
     auto const ray = Ray{
       Vector{GeometryA{ 1.5 }, GeometryA{ 2.5 }},
-      Vector{GeometryA{ 1.5 }, GeometryA{ 0.5 }}
+      Vector{GeometryA(3.0 / std::sqrt(10.0)), GeometryA(1.0 / std::sqrt(10.0)) }
     };
     auto const frustumPlanes = std::vector{
       Plane{GeometryA(2.0 * sqrt2),    Vector{ sqrt2Reciproc, sqrt2Reciproc }},
@@ -442,6 +443,7 @@ namespace
   {
     using AD = typename TOrthoTreeA::AD;
     using GeometryA = typename TOrthoTreeA::TGeometry;
+    using FPGeometryA = typename TOrthoTreeA::FPGeometry;
     using EntityID = typename TOrthoTreeA::TEntityID;
 
     auto const& [boxes, pickPoint, searchBox, ray, searchPlane, frustumPlanes] = testdata;
@@ -473,11 +475,11 @@ namespace
     auto const pickedIDsActual = quadtree.PickSearch(pickPoint); //: { 2, 4 }
     auto const pickedIDsExpected = std::vector<EntityID>{ 2, 4 };
 
-    auto const firstIntersectedBox = quadtree.RayIntersectedFirst(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), GeometryA(0.01)); //: 4
+    auto const firstIntersectedBoxes = quadtree.RayIntersectedFirst(ray, FPGeometryA(0.01)); //: 4
 
     auto const intersectedPointsActual =
       quadtree.RayIntersectedAll(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), GeometryA(0.01)); //: { 4, 2, 3 } in distance order!
-    auto const intersectedPointsExpected = std::vector<EntityID>{ 4, 2, 3 };
+    auto const intersectedPointsExpected = std::vector<EntityID>{ 2, 3, 4 };
 
     auto const boxesInFrustumActual = quadtree.FrustumCulling(frustumPlanes, GeometryA(0.01));
     auto const boxesInFrustumExpected = std::vector<EntityID>{ 1, 2, 4 };
@@ -495,8 +497,9 @@ namespace
     EXPECT_EQ_UNORDERED(insideBoxIDsExpected, insideBoxIDsActual);
     EXPECT_EQ_UNORDERED(overlappingBoxIDsExpected, overlappingBoxIDsActual);
     EXPECT_EQ_UNORDERED(pickedIDsExpected, pickedIDsActual);
-    ASSERT_TRUE(firstIntersectedBox.has_value());
-    EXPECT_EQ(EntityID(4), *firstIntersectedBox);
+    ASSERT_EQ(firstIntersectedBoxes.size(), 2);
+    EXPECT_EQ(EntityID(2), firstIntersectedBoxes[0]);
+    EXPECT_EQ(EntityID(4), firstIntersectedBoxes[1]);
     EXPECT_EQ(intersectedPointsExpected, intersectedPointsActual);
     EXPECT_EQ_UNORDERED(boxesInFrustumExpected, boxesInFrustumActual);
     EXPECT_EQ(entityIDsInDFSExpected, entityIDsInDFSActual);

@@ -273,8 +273,8 @@ void testCompileBox()
     [[maybe_unused]] auto const aidBoxesInRangeF = tree.template RangeSearch<false>(boxes[0], boxes);
     [[maybe_unused]] auto const aidBoxesInRangeT = tree.template RangeSearch<true>(boxes[0], boxes);
 
-    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 1.0, 1.0 }, boxes, 0);
-    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 1.0, 1.0 }, boxes, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 3.0 / 5.0, 4.0 / 5.0 }, boxes, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 3.0 / 5.0, 4.0 / 5.0 }, boxes, 0);
 
     [[maybe_unused]] auto const idPlaneIntersected = tree.PlaneIntersection(1.0, { 1.0, 0.0 }, 0.0, boxes);
     [[maybe_unused]] auto const idPlaneIntersectedP = tree.PlaneIntersection({1.0, { 1.0, 0.0 }}, 0.0, boxes);
@@ -367,8 +367,8 @@ void testCompileBoxMap()
     [[maybe_unused]] auto const aidBoxesInRangeF = tree.template RangeSearch<false>(boxes.at(10), boxes);
     [[maybe_unused]] auto const aidBoxesInRangeT = tree.template RangeSearch<true>(boxes.at(10), boxes);
 
-    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 1.0, 1.0 }, boxes, 0);
-    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 1.0, 1.0 }, boxes, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 3.0 / 5.0, 4.0 / 5.0 }, boxes, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 3.0 / 5.0, 4.0 / 5.0 }, boxes, 0);
 
     [[maybe_unused]] auto const idPlaneIntersected = tree.PlaneIntersection(1.0, { 1.0, 0.0 }, 0.0, boxes);
     [[maybe_unused]] auto const idPlaneIntersectedP = tree.PlaneIntersection(
@@ -605,8 +605,8 @@ void testCompileBoxC()
     [[maybe_unused]] auto const vidCollision = tree.template CollisionDetection<IS_PARALLEL_EXEC>();
     [[maybe_unused]] auto const vidCollisionTree = tree.CollisionDetection(tree);
    
-    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 1.0, 1.0 }, 0);
-    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 1.0, 1.0 }, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 3.0 / 5.0, 4.0 / 5.0 }, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 3.0 / 5.0, 4.0 / 5.0 }, 0);
 
     [[maybe_unused]] auto const idPlaneIntersected = tree.PlaneIntersection(1.0, { 1.0, 0.0 }, 0.0);
     [[maybe_unused]] auto const idPlaneIntersectedP = tree.PlaneIntersection({1.0, { 1.0, 0.0 }}, 0.0);
@@ -684,8 +684,8 @@ void testCompileBoxMapC()
     [[maybe_unused]] auto const vidCollision = tree.template CollisionDetection<IS_PARALLEL_EXEC>();
     [[maybe_unused]] auto const vidCollisionTree = tree.CollisionDetection(tree);
 
-    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 1.0, 1.0 }, 0);
-    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 1.0, 1.0 }, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedAll = tree.RayIntersectedAll({}, { 3.0 / 5.0, 4.0 / 5.0 }, 0);
+    [[maybe_unused]] auto const idBoxesIntersectedFirst = tree.RayIntersectedFirst({}, { 3.0 / 5.0, 4.0 / 5.0 }, 0);
 
     [[maybe_unused]] auto const idPlaneIntersected = tree.PlaneIntersection(1.0, { 1.0, 0.0 }, 0.0);
     [[maybe_unused]] auto const idPlaneIntersectedP = tree.PlaneIntersection(
