@@ -176,6 +176,27 @@ namespace OrthoTree
     struct IsStdOptional<std::optional<U>> : std::true_type
     {};
 
+    template<size_t... Is, class F>
+    constexpr void static_for_impl(std::index_sequence<Is...>, F&& f) noexcept
+    {
+      (f(static_cast<uint32_t>(std::integral_constant<size_t, Is>{})), ...);
+    }
+
+    template<size_t N, class F>
+    constexpr void static_for(F&& f) noexcept
+    {
+      if constexpr (N < 16)
+      {
+        static_for_impl(std::make_index_sequence<N>{}, std::forward<F>(f));
+      }
+      else
+      {
+        constexpr uint32_t uintN = static_cast<uint32_t>(N);
+        for (uint32_t i = 0; i < uintN; ++i)
+          f(i);
+      }
+    }
+
     template<typename T>
     inline constexpr bool IsStdOptionalV = IsStdOptional<T>::value;
 
@@ -1882,11 +1903,10 @@ namespace OrthoTree
         constexpr std::optional<BoxPickResult> Hit(const Vector& center, const Vector& halfSize) const noexcept
         {
           Vector minDifference, maxDifference;
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            minDifference[dimensionID] = center[dimensionID] - halfSize[dimensionID] - m_origin[dimensionID];
-
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            maxDifference[dimensionID] = center[dimensionID] + halfSize[dimensionID] - m_origin[dimensionID];
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { minDifference[dimensionID] = center[dimensionID] - halfSize[dimensionID] - m_origin[dimensionID]; });
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { maxDifference[dimensionID] = center[dimensionID] + halfSize[dimensionID] - m_origin[dimensionID]; });
 
           return HitTest<isConeToleranceConsidered>(minDifference, maxDifference);
         }
@@ -1895,11 +1915,10 @@ namespace OrthoTree
         constexpr std::optional<BoxPickResult> Hit(const TBox& box) const noexcept
         {
           Vector minDifference, maxDifference;
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            minDifference[dimensionID] = AD::GetBoxMinC(box, dimensionID) - m_origin[dimensionID];
-
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            maxDifference[dimensionID] = AD::GetBoxMaxC(box, dimensionID) - m_origin[dimensionID];
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { minDifference[dimensionID] = AD::GetBoxMinC(box, dimensionID) - m_origin[dimensionID]; });
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { maxDifference[dimensionID] = AD::GetBoxMaxC(box, dimensionID) - m_origin[dimensionID]; });
 
           return HitTest<isConeToleranceConsidered>(minDifference, maxDifference);
         }
@@ -1908,37 +1927,52 @@ namespace OrthoTree
         constexpr BoxRayHitTester() = default;
 
         template<bool isConeToleranceConsidered = true>
-        constexpr std::optional<BoxPickResult> HitTest(const Vector& minDifference, const Vector& maxDifference) const
+        constexpr std::optional<BoxPickResult> HitTest(const Vector& minDifference, const Vector& maxDifference) const noexcept
         {
           // plane distances
           std::array<Vector, 2> pd;
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            pd[0][dimensionID] = minDifference[dimensionID] * m_inverseDirection[dimensionID];
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { pd[0][dimensionID] = minDifference[dimensionID] * m_inverseDirection[dimensionID]; });
+          detail::static_for<DIMENSION_NO>(
+            [&](dim_t dimensionID) noexcept { pd[1][dimensionID] = maxDifference[dimensionID] * m_inverseDirection[dimensionID]; });
 
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
-            pd[1][dimensionID] = maxDifference[dimensionID] * m_inverseDirection[dimensionID];
-
-          // NaN is eliminated in std::fmax/fmin, and returns the non-NaN.
           std::optional pickResult =
             BoxPickResult{ .enterDistance = -std::numeric_limits<Geometry>::max(), .exitDistance = std::numeric_limits<Geometry>::max() };
 
-          for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+          // Find the largest entering distance and the smallest exiting distance. fmax/fmin handles NaN correctly.
+          if (m_hasNaNComponent)
           {
-            pickResult->enterDistance = std::fmax(pickResult->enterDistance, pd[m_signInfo[dimensionID]][dimensionID]);
-            pickResult->exitDistance = std::fmin(pickResult->exitDistance, pd[1 - m_signInfo[dimensionID]][dimensionID]);
+            detail::static_for<DIMENSION_NO>([&](dim_t dimensionID) noexcept {
+              pickResult->enterDistance = std::fmax(pickResult->enterDistance, pd[m_signInfo[dimensionID]][dimensionID]);
+            });
+            detail::static_for<DIMENSION_NO>([&](dim_t dimensionID) noexcept {
+              pickResult->exitDistance = std::fmin(pickResult->exitDistance, pd[1 - m_signInfo[dimensionID]][dimensionID]);
+            });
+          }
+          else
+          {
+            detail::static_for<DIMENSION_NO>([&](dim_t dimensionID) noexcept {
+              pickResult->enterDistance = std::max(pickResult->enterDistance, pd[m_signInfo[dimensionID]][dimensionID]);
+            });
+            detail::static_for<DIMENSION_NO>([&](dim_t dimensionID) noexcept {
+              pickResult->exitDistance = std::min(pickResult->exitDistance, pd[1 - m_signInfo[dimensionID]][dimensionID]);
+            });
           }
 
+          // enterDistance/exitDistance is not Nan from here
+
+          // Apply tolerance
           auto exitTolerance = Geometry{};
           if constexpr (isConeToleranceConsidered)
           {
-            exitTolerance = std::fmax(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance;
+            exitTolerance = std::max(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance;
 
-            pickResult->enterDistance -= Geometry(0.5) * (std::fmax(Geometry(0), pickResult->enterDistance) * m_toleranceIncrement + m_minTolerance);
-            pickResult->exitDistance += Geometry(0.5) * (std::fmax(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance);
+            pickResult->enterDistance -= Geometry(0.5) * (std::max(Geometry(0), pickResult->enterDistance) * m_toleranceIncrement + m_minTolerance);
+            pickResult->exitDistance += Geometry(0.5) * (std::max(Geometry(0), pickResult->exitDistance) * m_toleranceIncrement + m_minTolerance);
           }
           else
           { // Numerical inaccuracies could cause false-miss
-            exitTolerance = Geometry(0.5) * std::fmax(Geometry(1), pickResult->exitDistance) * std::numeric_limits<Geometry>::epsilon();
+            exitTolerance = Geometry(0.5) * std::max(Geometry(1), pickResult->exitDistance) * std::numeric_limits<Geometry>::epsilon();
 
             pickResult->enterDistance -= exitTolerance;
             pickResult->exitDistance += exitTolerance;
@@ -1952,7 +1986,7 @@ namespace OrthoTree
           }
 
           // Ray origin inside the box case
-          pickResult->enterDistance = std::fmax(Geometry(0), pickResult->enterDistance);
+          pickResult->enterDistance = std::max(Geometry(0), pickResult->enterDistance);
 
           // Handle zero direction components
           if (m_hasNaNComponent)
