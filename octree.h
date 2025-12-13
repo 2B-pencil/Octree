@@ -5796,7 +5796,7 @@ namespace OrthoTree
       TContainer const& boxes,
       IGM::BoxRayHitTester const& boxRayHitTester,
       TGeometry maxExaminationDistance,
-      const std::optional<std::function<std::optional<TGeometry>(TEntityID)>>& entityRayHitTester,
+      std::optional<std::function<std::optional<TGeometry>(TEntityID)>> const& entityRayHitTester,
       auto& foundEntities) const noexcept
     {
       auto const& node = this->GetNode(parentKey);
@@ -5851,7 +5851,7 @@ namespace OrthoTree
       TContainer const& boxes,
       IGM::Geometry tolerance = {},
       IGM::Geometry toleranceIncrement = {},
-      TGeometry maxExaminationDistance = {},
+      TGeometry maxExaminationDistance = std::numeric_limits<TGeometry>::max(),
       std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityRayHitTester = std::nullopt) const noexcept
     {
       const auto boxRayHitTester = IGM::BoxRayHitTester::Make(rayBasePoint, rayHeading, tolerance, toleranceIncrement);
@@ -5911,7 +5911,7 @@ namespace OrthoTree
 
     // Get all box which is intersected by the ray in order
     inline std::vector<TEntityID> RayIntersectedAll(
-      TRay const& ray, TContainer const& boxes, TGeometry tolerance = {}, TGeometry maxExaminationDistance = {}) const noexcept
+      TRay const& ray, TContainer const& boxes, TGeometry tolerance = {}, TGeometry maxExaminationDistance = std::numeric_limits<TGeometry>::max()) const noexcept
     {
       return RayIntersectedAll(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), boxes, tolerance, maxExaminationDistance);
     }
