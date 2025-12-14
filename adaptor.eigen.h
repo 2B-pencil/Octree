@@ -88,6 +88,74 @@ namespace OrthoTree
 
       static constexpr Scalar_ Distance2(VectorType_ const& v1, VectorType_ const& v2) noexcept { return Size2(v1 - v2); }
 
+
+      struct PointBoxMinMaxDistance
+      {
+        // Minimum possible distance from the query point to any object contained in the box.
+        // If the point lies inside the box, this value is zero.
+        Scalar_ min = {};
+
+        // Maximum possible nearest-distance in the worst case.
+        // Assumes an object inside the box is placed adversarially so as to maximize
+        // its minimum distance to the query point (i.e. the worst-case nearest object).
+        Scalar_ minMax = {};
+      };
+
+      static constexpr PointBoxMinMaxDistance MinMaxDistance2(VectorType_ const& pt, AlignedBox_ const& box, Scalar_ tolerance) noexcept
+      {
+        // N. Roussopoulos, S. Kelley, F. Vincent - Nearest Neighbor Queries (1995) DOI.10.1145 / 223784.223794
+        // MINMAXDIST
+
+        auto dist2 = PointBoxMinMaxDistance{};
+
+        const VectorType_ minDist = pt - box.min();
+        const VectorType_ maxDist = box.max() - pt;
+
+        Scalar_ farthestInsideDistance2 = std::numeric_limits<Scalar_>::max();
+        Scalar_ largestMinMax2Difference = {};
+        auto isInside = true;
+        for (dim_t dimensionID = 0; dimensionID < AmbientDim_; ++dimensionID)
+        {
+          bool isInsideInComponent = (-tolerance <= minDist[dimensionID] && -tolerance <= maxDist[dimensionID]);
+          isInside &= isInsideInComponent;
+
+          auto minDist2 = minDist[dimensionID] * minDist[dimensionID];
+          auto maxDist2 = maxDist[dimensionID] * maxDist[dimensionID];
+
+          if (maxDist2 < minDist2)
+            std::swap(minDist2, maxDist2);
+
+          if (isInside)
+            farthestInsideDistance2 = std::min(farthestInsideDistance2, maxDist2);
+
+          if (!isInsideInComponent)
+            dist2.min += minDist2;
+
+          largestMinMax2Difference = std::max(largestMinMax2Difference, maxDist2 - minDist2);
+          dist2.minMax += maxDist2;
+        }
+
+        if (isInside)
+        {
+          dist2.min = {};
+          dist2.minMax = farthestInsideDistance2;
+        }
+        else
+        {
+          dist2.minMax -= largestMinMax2Difference;
+        }
+
+        return dist2;
+      }
+
+      static constexpr PointBoxMinMaxDistance MinMaxDistance(VectorType_ const& pt, AlignedBox_ const& box, Scalar_ tolerance) noexcept
+      {
+        auto dist = MinMaxDistance2(pt, box, tolerance);
+        dist.min = std::sqrt(dist.min);
+        dist.minMax = std::sqrt(dist.minMax);
+        return dist;
+      }
+
       static constexpr bool ArePointsEqual(VectorType_ const& v1, VectorType_ const& v2, Scalar_ tolerance) noexcept
       {
         return Distance2(v1, v2) <= tolerance * tolerance;

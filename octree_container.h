@@ -332,6 +332,17 @@ namespace OrthoTree
     {
       return this->m_tree.FrustumCulling(boundaryPlanes, tolerance, this->m_geometryCollection);
     }
+
+    // K Nearest Neighbor
+    inline std::vector<TEntityID> GetNearestNeighbors(
+      TVector const& pt,
+      std::size_t k,
+      TGeometry maxDistanceWithin = std::numeric_limits<TGeometry>::max(),
+      FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon(),
+      std::optional<typename OrthoTreeCore::EntityDistanceFn> const& entityDistanceFn = std::nullopt) const noexcept
+    {
+      return this->m_tree.GetNearestNeighbors(pt, k, maxDistanceWithin, this->m_geometryCollection, tolerance, entityDistanceFn);
+    }
   };
 
 
@@ -441,12 +452,6 @@ namespace OrthoTree
     inline std::vector<TEntityID> RangeSearch(TBox const& range) const noexcept
     {
       return this->m_tree.template RangeSearch<DOES_LEAF_NODE_CONTAIN_ELEMENT_ONLY>(range, this->m_geometryCollection);
-    }
-
-    // K Nearest Neighbor
-    inline std::vector<TEntityID> GetNearestNeighbors(TVector const& pt, std::size_t k) const noexcept
-    {
-      return this->m_tree.GetNearestNeighbors(pt, k, this->m_geometryCollection);
     }
 
   public: // Plane
@@ -583,8 +588,7 @@ namespace OrthoTree
     }
 
     // Get all entities that are intersected by the ray in order
-    inline std::vector<TEntityID> RayIntersectedAll(
-      TRay const& ray, TGeometry tolerance, TGeometry maxDistance = std::numeric_limits<TGeometry>::max()) const noexcept
+    inline std::vector<TEntityID> RayIntersectedAll(TRay const& ray, TGeometry tolerance, TGeometry maxDistance = std::numeric_limits<TGeometry>::max()) const noexcept
     {
       return this->m_tree.RayIntersectedAll(ray, this->m_geometryCollection, tolerance, maxDistance);
     }

@@ -228,7 +228,7 @@ namespace AdaptorTest
         
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2, 8, 9 }, pointsInSearchBox));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 5, 6, 7, 8, 9 }, pointsInPlane));
-        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8 }, entityIDsKNN));
+        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8, 9 }, entityIDsKNN));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 3, 4, 6, 7 }, pointsInFrustum));
 
         Assert::IsTrue(vector<EntityID>{ 7, 6, 5, 0, 2, 1, 8, 9, 3, 4 } == entityIDsInBFS);
@@ -374,7 +374,7 @@ namespace AdaptorTest
         
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2, 8, 9 }, pointsInSearchBox));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 5, 6, 7, 8, 9 }, pointsInPlane));
-        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8 }, entityIDsKNN));
+        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8, 9 }, entityIDsKNN));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 3, 4, 6, 7 }, pointsInFrustum));
 
         Assert::IsTrue(vector<EntityID>{ 7, 6, 5, 0, 2, 1, 8, 9, 3, 4 } == entityIDsInBFS);
@@ -902,7 +902,7 @@ namespace AdaptorTest
 
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1, 2, 8, 9 }, pointsInSearchBox));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 5, 6, 7, 8, 9 }, pointsInPlane));
-        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8 }, entityIDsKNN));
+        Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 1, 10, 8, 9 }, entityIDsKNN));
         Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 2, 3, 4, 6, 7 }, pointsInFrustum));
 
         Assert::IsTrue(vector<EntityID>{ 7, 6, 5, 0, 2, 1, 8, 9, 3, 4 } == entityIDsInBFS);

@@ -344,7 +344,7 @@ namespace
     auto const entityIDsInDFS_AfterErase_Expected = std::vector<EntityID>{ 1, 8, 10, 9, 7, 6, 5, 2, 3, 4 };
 
     auto const entityIDsKNNActual = tree.GetNearestNeighbors(pointOfkNN, 3, points);
-    auto const entityIDsKNNExpected = std::vector<EntityID>{ 1, 10, 8 };
+    auto const entityIDsKNNExpected = std::vector<EntityID>{ 1, 10, 8, 9 };
 
     if (!doCheck)
       return;

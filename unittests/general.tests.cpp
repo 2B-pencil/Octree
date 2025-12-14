@@ -2158,7 +2158,7 @@ namespace Tree2DTest
       Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{17, 18, 14, 16}, vnn));
     }
 
-    TEST_METHOD(N103_k4_within0__empty)
+    TEST_METHOD(N103_k4_within0__17_18)
     {
       auto constexpr N = 2;
       auto constexpr points = getPointSetNo1<N>();
@@ -2166,10 +2166,10 @@ namespace Tree2DTest
 
       auto constexpr pt = PointND<N>{ 3.5, 5.5 };
       auto const vnn = tree.GetNearestNeighbors(pt, 4, 0, points);
-      Assert::IsTrue(vnn.empty());
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 17, 18 }, vnn));
     }
 
-    TEST_METHOD(N103_k5_within1__14_17_18)
+    TEST_METHOD(N103_k5_within1__14_17_18_16)
     {
       auto constexpr N = 2;
       auto constexpr points = getPointSetNo1<N>();
@@ -2177,7 +2177,7 @@ namespace Tree2DTest
 
       auto constexpr pt = PointND<N>{ 3.5, 5.5 };
       auto const vnn = tree.GetNearestNeighbors(pt, 5, 1.0, points);
-      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 17, 18, 14 }, vnn));
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 17, 18, 14, 16 }, vnn));
     }
 
     TEST_METHOD(N103_k100_OverTheContainingElements__All)
@@ -2252,8 +2252,6 @@ namespace Tree2DTest
       Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{0, 1, 5, 6, 11}, vnn));
     }
 
-
-
     TEST_METHOD(OutSide_k5_16D__0_1_5_6_11)
     {
       auto constexpr N = 23;
@@ -2265,6 +2263,63 @@ namespace Tree2DTest
       Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{0, 1, 5, 6, 11}, vnn));
     }
 
+    
+    TEST_METHOD(GetNearestNeighbors_EntityDistanceFn)
+    {
+      using Box = BoundingBox2D;
+      using Pt = Point2D;
+      constexpr array<Box, 3> boxes = {
+        Box{ { 0.0, 0.0 }, { 2.0, 2.0 } }, // id=0
+        Box{ { 2.0, 2.0 }, { 4.0, 4.0 } }, // id=1
+        Box{ { 5.0, 5.0 }, { 6.0, 6.0 } }  // id=2
+      };
+      const auto tree = QuadtreeBoxs<false>(boxes, 3, std::nullopt, 2);
+
+      const Pt searchPt{ 2.5, 2.5 };
+
+      auto realEntityDistance = [&](const Pt&, EntityID id) -> double {
+        switch (id)
+        {
+        case 0: return 1.0;
+        case 1: return 1.25;
+        case 2: return 4.0;
+        }
+
+        return double(id * 10);
+      };
+
+      auto const result = tree.GetNearestNeighbors(searchPt, 1, std::numeric_limits<double>::max(), boxes, std::numeric_limits<double>::epsilon(), realEntityDistance);
+
+      vector<EntityID> expected{ 0 };
+      Assert::AreEqual<size_t>(1, result.size());
+      Assert::IsTrue(std::ranges::is_permutation(result, expected));
+    }
+
+    TEST_METHOD(GetNearestNeighbors_MinMaxDistance)
+    {
+      using Box = BoundingBox2D;
+      using Pt = Point2D;
+
+      // od: optimistic distance
+      // pd: pessimistic distance
+      constexpr auto boxes = std::array {
+        Box{ { +0.20, 0.00 }, { +0.21, 2.30 } }, // od: 0.20, pd: 2.31 // winner in tie
+        Box{ { +1.00, 0.00 }, { +1.01, 1.00 } }, // od: 1.00, pd: 1.41 // closed out by [2]
+        Box{ { +0.40, 0.00 }, { +0.41, 0.80 } }, // od: 0.40, pd: 0.89 // possible winner by pessimistic distance
+        Box{ { +2.10, 0.00 }, { +2.11, 3.00 } }, // od: 2.10, pd: 3.66 // obviously ruled out
+        Box{ { -0.21, 0.00 }, { -0.20, 2.20 } }, // od: 0.20, pd: 2.21 // winner in tie
+        Box{ { -0.91, 0.00 }, { -0.90, 2.30 } }, // od: 0.90, pd: 2.47 // ruled out by [2]
+      };
+      const auto tree = QuadtreeBoxs<false>(boxes, 3, std::nullopt, 2);
+
+      const Pt searchPt{ 0.0, 0.0 };
+
+      auto const result = tree.GetNearestNeighbors(searchPt, 1, std::numeric_limits<double>::max(), boxes, std::numeric_limits<double>::epsilon());
+
+      vector<EntityID> expected{ 0, 2, 4 };
+      Assert::AreEqual<size_t>(expected.size(), result.size());
+      Assert::IsTrue(std::ranges::is_permutation(result, expected));
+    }
 
     TEST_METHOD(Issue9_2D)
     {
@@ -2361,6 +2416,39 @@ namespace Tree2DTest
       auto const neighbors = tree.GetNearestNeighbors(search_point, 1, poses);
       auto const idMinExpected = EntityID(std::distance(poses.begin(), itMinExpected));
       Assert::AreEqual<EntityID>(idMinExpected, neighbors[0]);
+    }
+
+    TEST_METHOD(BoxNN_k1__InsideSingleBox)
+    {
+      auto constexpr boxes = array
+      {
+        BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } }, // 0
+        BoundingBox2D{ { 1.0, 1.0 }, { 3.0, 3.0 } }, // 1
+        BoundingBox2D{ { 4.0, 4.0 }, { 5.0, 5.0 } }  // 2
+      };
+
+      auto const tree = QuadtreeBoxs<false>(boxes, 3, std::nullopt, 2);
+
+      auto constexpr pt = Point2D{ 2.0, 2.0 }; // inside box 1
+      auto const vnn = tree.GetNearestNeighbors(pt, 1, boxes);
+
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0, 1 }, vnn));
+    }
+
+    TEST_METHOD(BoxNN_k1__OutsideSingleBox)
+    {
+      auto constexpr boxes = array{
+        BoundingBox2D{ { 0.0, 0.0 }, { 1.0, 1.0 } }, // 0
+        BoundingBox2D{ { 1.0, 1.0 }, { 3.0, 3.0 } }, // 1
+        BoundingBox2D{ { 4.0, 4.0 }, { 5.0, 5.0 } }  // 2
+      };
+
+      auto const tree = QuadtreeBoxs<false>(boxes, 3, std::nullopt, 2);
+
+      auto constexpr pt = Point2D{ -1.0, 1.0 }; // outside of the box, further distance rank lower the [1].
+      auto const vnn = tree.GetNearestNeighbors(pt, 1, boxes);
+
+      Assert::IsTrue(std::ranges::is_permutation(vector<EntityID>{ 0 }, vnn));
     }
   };
 
@@ -3751,15 +3839,29 @@ namespace LongIntAdaptor
       return points;
     }
 
-    std::vector<EntityID> kNNSearchBruteForce(std::vector<Point2D> const& points, Point2D const& point, int k){ 
+    std::vector<EntityID> kNNSearchBruteForce(std::vector<Point2D> const& points, Point2D const& point, size_t k){ 
 
       std::vector<EntityID> ids(points.size());
       std::iota(ids.begin(), ids.end(), 0);
-      std::partial_sort(ids.begin(), ids.begin() + k + 1, ids.end(), [&](auto const& i1, auto const& i2) {
+      std::partial_sort(ids.begin(), ids.begin() + std::min(k + 10, points.size()), ids.end(), [&](auto const& i1, auto const& i2) {
         return std::hypot(point[0] - points[i1][0], point[1] - points[i1][1]) < std::hypot(point[0] - points[i2][0], point[1] - points[i2][1]);
       });
 
-      return std::vector<EntityID>(ids.begin(), ids.begin() + k);
+      auto result = std::vector<EntityID>(ids.begin(), ids.begin() + k);
+      auto distLast = std::hypot(point[0] - points[ids[k - 1]][0], point[1] - points[ids[k - 1]][1]);
+      auto limit = std::max(std::numeric_limits<double>::epsilon(), distLast * (1.0 + std::numeric_limits<double>::epsilon()));
+      for (size_t i = k; i < ids.size(); ++i)
+      {
+        auto dist = std::hypot(point[0] - points[ids[i]][0], point[1] - points[ids[i]][1]);
+        if (dist < limit)
+          result.push_back(ids[i]);
+        else
+          return result;
+      }
+
+      // Test is not set correctly.
+      Assert::IsTrue(false);
+      return result;
     }
 
     TEST_METHOD(Issue36_kNN_Random)

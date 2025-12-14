@@ -371,6 +371,76 @@ namespace OrthoTree
 
       static constexpr FGeometry_ Size(FVector_ const& point) noexcept { return point.Size(); }
 
+      struct PointBoxMinMaxDistance
+      {
+        // Minimum possible distance from the query point to any object contained in the box.
+        // If the point lies inside the box, this value is zero.
+        double min = {};
+
+        // Maximum possible nearest-distance in the worst case.
+        // Assumes an object inside the box is placed adversarially so as to maximize
+        // its minimum distance to the query point (i.e. the worst-case nearest object).
+        double minMax = {};
+      };
+      static constexpr PointBoxMinMaxDistance MinMaxDistance2(FVector_ const& pt, FBox_ const& box, double tolerance) noexcept
+      {
+        // N. Roussopoulos, S. Kelley, F. Vincent - Nearest Neighbor Queries (1995) DOI.10.1145 / 223784.223794
+        // MINMAXDIST
+
+        auto dist2 = PointBoxMinMaxDistance{};
+
+        double farthestInsideDistance2 = std::numeric_limits<double>::max();
+        double largestMinMax2Difference = {};
+        auto isInside = true;
+        for (dim_t dimensionID = 0; dimensionID < AmbientDim_; ++dimensionID)
+        {
+          const auto v = Base::GetPointC(pt, dimensionID);
+          const auto minC = Base::GetBoxMinC(box, dimensionID);
+          const auto maxC = Base::GetBoxMaxC(box, dimensionID);
+
+          const auto minDist = v - minC;
+          const auto maxDist = maxC - v;
+
+          bool isInsideInComponent = (-tolerance <= minDist && -tolerance <= maxDist);
+          isInside &= isInsideInComponent;
+
+          auto minDist2 = minDist * minDist;
+          auto maxDist2 = maxDist * maxDist;
+
+          if (maxDist2 < minDist2)
+            std::swap(minDist2, maxDist2);
+
+          if (isInside)
+            farthestInsideDistance2 = std::min(farthestInsideDistance2, maxDist2);
+
+          if (!isInsideInComponent)
+            dist2.min += minDist2;
+
+          largestMinMax2Difference = std::max(largestMinMax2Difference, maxDist2 - minDist2);
+          dist2.minMax += maxDist2;
+        }
+
+        if (isInside)
+        {
+          dist2.min = {};
+          dist2.minMax = farthestInsideDistance2;
+        }
+        else
+        {
+          dist2.minMax -= largestMinMax2Difference;
+        }
+
+        return dist2;
+      }
+
+      static constexpr PointBoxMinMaxDistance MinMaxDistance(FVector_ const& pt, FBox_ const& box, double tolerance) noexcept
+      {
+        auto dist = MinMaxDistance2(pt, box, tolerance);
+        dist.min = std::sqrt(dist.min);
+        dist.minMax = std::sqrt(dist.minMax);
+        return dist;
+      }
+
       static constexpr FVector_ Add(FVector_ const& v1, FVector_ const& v2) noexcept { return v1 + v2; }
 
       static constexpr FVector_ Subtract(FVector_ const& v1, FVector_ const& v2) noexcept { return v1 - v2; }

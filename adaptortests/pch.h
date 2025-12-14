@@ -10,7 +10,7 @@
 #include <vector>
 
 template<typename T1, typename T2>
-static bool AreContainersItemsEqual(T1 const& l, T2 const& r)
+bool AreContainersItemsEqual(T1 const& l, T2 const& r)
 {
   if (l.size() != r.size())
     return false;

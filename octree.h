@@ -1205,6 +1205,76 @@ namespace OrthoTree
 
     static constexpr TGeometry Distance(TVector const& ptL, TVector const& ptR) noexcept { return std::sqrt(Distance2(ptL, ptR)); }
 
+    struct PointBoxMinMaxDistance
+    {
+      // Minimum possible distance from the query point to any object contained in the box.
+      // If the point lies inside the box, this value is zero.
+      TGeometry min = {};
+
+      // Maximum possible nearest-distance in the worst case.
+      // Assumes an object inside the box is placed adversarially so as to maximize
+      // its minimum distance to the query point (i.e. the worst-case nearest object).
+      TGeometry minMax = {};
+    };
+    static constexpr PointBoxMinMaxDistance MinMaxDistance2(TVector const& pt, TBox const& box, TGeometry tolerance) noexcept
+    {
+      // N. Roussopoulos, S. Kelley, F. Vincent - Nearest Neighbor Queries (1995) DOI.10.1145 / 223784.223794
+      // MINMAXDIST
+
+      auto dist2 = PointBoxMinMaxDistance{};
+
+      TGeometry farthestInsideDistance2 = std::numeric_limits<TGeometry>::max();
+      TGeometry largestMinMax2Difference = {};
+      auto isInside = true;
+      for (dim_t dimensionID = 0; dimensionID < DIMENSION_NO; ++dimensionID)
+      {
+        const auto v = Base::GetPointC(pt, dimensionID);
+        const auto minC = Base::GetBoxMinC(box, dimensionID);
+        const auto maxC = Base::GetBoxMaxC(box, dimensionID);
+
+        const auto minDist = v - minC;
+        const auto maxDist = maxC - v;
+
+        bool isInsideInComponent = (-tolerance <= minDist && -tolerance <= maxDist);
+        isInside &= isInsideInComponent;
+
+        auto minDist2 = minDist * minDist;
+        auto maxDist2 = maxDist * maxDist;
+
+        if (maxDist2 < minDist2)
+          std::swap(minDist2, maxDist2);
+
+        if (isInside)
+          farthestInsideDistance2 = std::min(farthestInsideDistance2, maxDist2);
+
+        if (!isInsideInComponent)
+          dist2.min += minDist2;
+
+        largestMinMax2Difference = std::max(largestMinMax2Difference, maxDist2 - minDist2);
+        dist2.minMax += maxDist2;
+      }
+
+      if (isInside)
+      {
+        dist2.min = {};
+        dist2.minMax = farthestInsideDistance2;
+      }
+      else
+      {
+        dist2.minMax -= largestMinMax2Difference;
+      }
+
+      return dist2;
+    }
+
+    static constexpr PointBoxMinMaxDistance MinMaxDistance(TVector const& pt, TBox const& box, TGeometry tolerance) noexcept
+    {
+      auto dist = MinMaxDistance2(pt, box, tolerance);
+      dist.min = std::sqrt(dist.min);
+      dist.minMax = std::sqrt(dist.minMax);
+      return dist;
+    }
+
     static constexpr bool ArePointsEqual(TVector const& ptL, TVector const& ptR, TGeometry rAccuracy) noexcept
     {
       return Distance2(ptL, ptR) <= rAccuracy * rAccuracy;
@@ -2710,6 +2780,9 @@ namespace OrthoTree
     using IGM = typename detail::InternalGeometryModule<DIMENSION_NO, TGeometry, TVector, TBox, TAdapter>;
     using IGM_Geometry = typename IGM::Geometry;
 
+    // Even if integer is used as TGeometry, tolerance and other distance handling requires floating point-based numbers.
+    using FPGeometry = IGM_Geometry;
+
     using SI = detail::MortonSpaceIndexing<DIMENSION_NO>;
     using MortonNodeID = typename SI::NodeID;
     using MortonNodeIDCR = typename SI::NodeIDCR;
@@ -4149,6 +4222,264 @@ namespace OrthoTree
 
       return results;
     }
+
+  public: // K Nearest Neighbor
+    // Get the precise distance between the entity and kNN's search point. Floating-point return value is required.
+    using EntityDistanceFn = std::function<FPGeometry(TVector const&, TEntityID)>;
+
+  private: // K Nearest Neighbor helpers
+    static constexpr FPGeometry GetValueWithToleranceUpper(FPGeometry value, FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon()) noexcept
+    {
+      return std::fmax(tolerance, value * (FPGeometry(1.0) + tolerance));
+    }
+
+    static constexpr FPGeometry GetValueWithToleranceLower(FPGeometry value, FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon()) noexcept
+    {
+      return value == 0 ? -tolerance : (value * (FPGeometry(1.0) - tolerance));
+    }
+
+    struct MinEntityDistance
+    {
+      TEntityID entityID;
+      FPGeometry optimisticDistance;
+      FPGeometry pessimisticDistance;
+
+      constexpr auto operator<=>(MinEntityDistance const& other) const noexcept { return optimisticDistance <=> other.optimisticDistance; }
+    };
+
+    static bool AreOverflownNearestNeighborsDroppable(
+      std::size_t neighborNo, std::vector<MinEntityDistance> const& neighborEntities, TGeometry farthestEntityDistance) noexcept
+    {
+      std::size_t tieCountOverK = neighborNo >= neighborEntities.size() ? 0 : (neighborEntities.size() - neighborNo + 1);
+      if (tieCountOverK == 0)
+        return false;
+
+      if (farthestEntityDistance > neighborEntities[0].optimisticDistance)
+        return false;
+
+      std::size_t tieCount = 1;
+      std::size_t nonTieCount = 0; // if the whole level is non-tie, all elements above can be excluded.
+      std::size_t levelEnd = 3;
+      std::size_t elementNoInLevel = 2;
+      for (std::size_t index = 1; index < neighborEntities.size(); ++index)
+      {
+        auto const& e = neighborEntities[index];
+        if (e.optimisticDistance >= farthestEntityDistance)
+          ++tieCount;
+        else
+          ++nonTieCount;
+
+        if (tieCount >= tieCountOverK)
+          return false;
+
+        if (index == levelEnd)
+        {
+          if (nonTieCount == elementNoInLevel)
+            return true;
+
+          nonTieCount = 0;
+          elementNoInLevel = levelEnd + 1;
+          levelEnd += elementNoInLevel;
+        }
+      }
+
+      return true;
+    }
+
+    struct FarthestDistance
+    {
+      FPGeometry lower;
+      FPGeometry upper;
+    };
+
+    static void AddEntityDistance(
+      std::size_t neighborNo,
+      TVector const& searchPoint,
+      std::optional<EntityDistanceFn> const& entityDistanceFn,
+      auto const& nodeEntityIDs,
+      TContainer const& entities,
+      FPGeometry tolerance,
+      std::vector<MinEntityDistance>& neighborEntities,
+      FarthestDistance& farthestEntityDistance) noexcept
+    {
+      for (auto const entityID : nodeEntityIDs)
+      {
+        typename AD::PointBoxMinMaxDistance pbd;
+        if constexpr (IS_BOX_TYPE)
+        {
+          pbd = AD::MinMaxDistance(searchPoint, detail::at(entities, entityID), tolerance);
+        }
+        else
+        {
+          const auto distance = AD::Distance(searchPoint, detail::at(entities, entityID));
+          pbd = { distance, distance };
+        }
+
+        if (pbd.min >= farthestEntityDistance.upper)
+          continue;
+
+        if (entityDistanceFn)
+        {
+          pbd.min = (*entityDistanceFn)(searchPoint, entityID);
+          if (pbd.min >= farthestEntityDistance.upper)
+            continue;
+
+          pbd.minMax = pbd.min;
+        }
+
+        auto const shouldHeapify = neighborEntities.size() == neighborNo - 1;
+        neighborEntities.push_back({ entityID, pbd.min, pbd.minMax });
+        if (neighborEntities.size() < neighborNo)
+          continue;
+
+        if (shouldHeapify)
+        {
+          std::make_heap(neighborEntities.begin(), neighborEntities.end());
+        }
+        else
+        {
+          std::push_heap(neighborEntities.begin(), neighborEntities.end());
+
+          if (AreOverflownNearestNeighborsDroppable(neighborNo, neighborEntities, farthestEntityDistance.lower))
+          {
+            auto endIt = neighborEntities.end();
+            while (neighborEntities.front().optimisticDistance >= farthestEntityDistance.lower)
+            {
+              std::pop_heap(neighborEntities.begin(), endIt);
+              --endIt;
+            }
+
+            neighborEntities.resize(neighborNo);
+          }
+        }
+
+        FPGeometry maxMinMax;
+        if constexpr (IS_BOX_TYPE)
+        {
+          maxMinMax = std::max_element(neighborEntities.begin(), neighborEntities.begin() + std::min(neighborNo, neighborEntities.size()), [](auto const& lhs, auto const& rhs) {
+                        return lhs.pessimisticDistance < rhs.pessimisticDistance;
+                      })->pessimisticDistance;
+        }
+        else
+        {
+          maxMinMax = neighborEntities.front().optimisticDistance;
+        }
+
+        auto const newFarthestEntityDistanceUpper = GetValueWithToleranceUpper(maxMinMax, tolerance);
+        if (newFarthestEntityDistanceUpper < farthestEntityDistance.upper)
+        {
+          farthestEntityDistance.lower = GetValueWithToleranceLower(maxMinMax, tolerance);
+          farthestEntityDistance.upper = newFarthestEntityDistanceUpper;
+        }
+      }
+    }
+
+    template<bool SHOULD_SORT_ENTITIES_BY_DISTANCE = true>
+    static constexpr std::vector<TEntityID> ConvertEntityDistanceToList(std::vector<MinEntityDistance>& neighborEntities, std::size_t neighborNo) noexcept
+    {
+      auto entityIDs = std::vector<TEntityID>();
+      if (neighborEntities.empty())
+        return entityIDs;
+
+      if (neighborEntities.size() < neighborNo)
+      {
+        if constexpr (SHOULD_SORT_ENTITIES_BY_DISTANCE)
+        {
+          std::sort(neighborEntities.begin(), neighborEntities.end());
+        }
+      }
+      else
+      {
+        std::sort_heap(neighborEntities.begin(), neighborEntities.end());
+      }
+
+      auto const entityNo = neighborEntities.size();
+      entityIDs.resize(entityNo);
+      for (std::size_t i = 0; i < entityNo; ++i)
+        entityIDs[i] = neighborEntities[i].entityID;
+
+      return entityIDs;
+    }
+
+    constexpr IGM::Geometry GetNodeWallDistance(
+      TVector const& searchPoint, MortonNodeIDCR key, [[maybe_unused]] Node const& node, bool isInsideConsideredAsZero) const noexcept
+    {
+      auto const depthID = SI::GetDepthID(key);
+      auto const& halfSize = this->GetNodeSize(depthID + 1);
+      auto const& centerPoint = GetNodeCenterMacro(this, key, node);
+      return IGM::GetBoxWallDistanceAD(searchPoint, centerPoint, halfSize, isInsideConsideredAsZero);
+    }
+
+  public:
+    // Get K Nearest Neighbor sorted by distance (point distance should be less than maxDistanceWithin, it is used as a Tolerance check). It may
+    // results more element than neighborNo, if those are in equal distance (point-like) or possible hit (box-like).
+    template<bool SHOULD_SORT_ENTITIES_BY_DISTANCE = true>
+    std::vector<TEntityID> GetNearestNeighbors(
+      TVector const& searchPoint,
+      std::size_t neighborNo,
+      TGeometry maxDistanceWithin,
+      TContainer const& entities,
+      FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon(),
+      std::optional<EntityDistanceFn> const& entityDistanceFn = std::nullopt) const noexcept
+    {
+      assert(neighborNo > 0 && "At least one neighbor must be requested!");
+
+      auto neighborEntities = std::vector<MinEntityDistance>();
+      neighborEntities.reserve(neighborNo + 4);
+
+      auto smallestNodeKey = this->FindSmallestNodeKey(this->template GetNodeID<true>(searchPoint));
+      if (!SI::IsValidKey(smallestNodeKey))
+        smallestNodeKey = SI::GetRootKey();
+
+      // farthestEntityDistance already contains the numerical tolerance
+      auto farthestEntityDistance =
+        FarthestDistance{ {},
+                          maxDistanceWithin == std::numeric_limits<TGeometry>::max() ? std::numeric_limits<TGeometry>::max()
+                                                                                     : GetValueWithToleranceUpper(maxDistanceWithin, tolerance) };
+
+      // Parent checks (in a usual case parents do not have entities)
+      for (auto nodeKey = smallestNodeKey; SI::IsValidKey(nodeKey); nodeKey = SI::GetParentKey(nodeKey))
+        AddEntityDistance(
+          neighborNo, searchPoint, entityDistanceFn, this->GetNodeEntities(nodeKey), entities, tolerance, neighborEntities, farthestEntityDistance);
+
+      this->VisitNodesInPriorityOrder(
+        SI::GetRootKey(),
+        [&](Node const& node, FPGeometry nodeDistance) -> TraverseControl {
+          if (nodeDistance >= farthestEntityDistance.upper)
+            return TraverseControl::Terminate;
+
+          // Skip already visited parent nodes
+          if (smallestNodeKey == node.GetKey() || SI::IsParentKey(smallestNodeKey, node.GetKey()))
+            return TraverseControl::Continue;
+
+          AddEntityDistance(
+            neighborNo, searchPoint, entityDistanceFn, this->GetNodeEntities(node), entities, tolerance, neighborEntities, farthestEntityDistance);
+
+          return TraverseControl::Continue;
+        },
+        [&](Node const& node) -> std::optional<FPGeometry> {
+          auto wallDistance = this->GetNodeWallDistance(searchPoint, node.GetKey(), node, true);
+          if (wallDistance >= farthestEntityDistance.upper)
+            return std::nullopt;
+
+          return wallDistance;
+        });
+
+      return ConvertEntityDistanceToList<SHOULD_SORT_ENTITIES_BY_DISTANCE>(neighborEntities, neighborNo);
+    }
+
+    // Get K Nearest Neighbor sorted by distance
+    template<bool SHOULD_SORT_ENTITIES_BY_DISTANCE = true>
+    std::vector<TEntityID> GetNearestNeighbors(
+      TVector const& searchPoint,
+      std::size_t neighborNo,
+      TContainer const& points,
+      FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon(),
+      std::optional<EntityDistanceFn> const& entityDistanceFn = std::nullopt) const noexcept
+    {
+      return this->GetNearestNeighbors<SHOULD_SORT_ENTITIES_BY_DISTANCE>(
+        searchPoint, neighborNo, std::numeric_limits<TGeometry>::max(), points, tolerance, entityDistanceFn);
+    }
   };
 
   namespace ExecutionTags
@@ -4362,7 +4693,7 @@ namespace OrthoTree
 
 
     // Insert entity into a node, if there is no entity within the same location by tolerance.
-    bool InsertUnique(TEntityID newEntityID, TVector const& newPoint, TGeometry tolerance, TContainer const& points, bool doInsertToLeaf = false)
+    bool InsertUnique(TEntityID newEntityID, TVector const& newPoint, IGM::Geometry tolerance, TContainer const& points, bool doInsertToLeaf = false)
     {
       if (!IGM::DoesBoxContainPointAD(this->m_grid.GetBoxSpace(), newPoint))
         return false;
@@ -4373,7 +4704,7 @@ namespace OrthoTree
       if (!SI::IsValidKey(parentNodeKey))
         return false;
 
-      auto const nearestEntityList = this->GetNearestNeighbors(newPoint, 1, tolerance, points);
+      auto const nearestEntityList = this->GetNearestNeighbors(newPoint, 1, 0.0, points, tolerance);
       if (!nearestEntityList.empty())
         return false;
 
@@ -4521,130 +4852,6 @@ namespace OrthoTree
     {
       return this->FrustumCullingBase(boundaryPlanes, tolerance, points);
     }
-
-
-  private: // K Nearest Neighbor helpers
-    static inline void AddEntityDistance(
-      auto const& entities,
-      TVector const& searchPoint,
-      TContainer const& points,
-      std::vector<EntityDistance>& neighborEntities,
-      std::size_t neighborNo,
-      TGeometry& maxDistanceWithin) noexcept
-    {
-      for (auto const entityID : entities)
-      {
-        const auto distance = AD::Distance(searchPoint, detail::at(points, entityID));
-
-        // maxDistanceWithin is implemented for tolerance handling: distance should be less than maxDistanceWithin
-        if (distance >= maxDistanceWithin)
-          continue;
-
-        if (neighborEntities.size() < neighborNo - 1)
-          neighborEntities.push_back({ { distance }, entityID });
-        else
-        {
-          if (neighborEntities.size() < neighborNo)
-          {
-            std::make_heap(neighborEntities.begin(), neighborEntities.end());
-            neighborEntities.push_back({ { distance }, entityID });
-          }
-          else
-          {
-            std::pop_heap(neighborEntities.begin(), neighborEntities.end());
-            neighborEntities.back() = { { distance }, entityID };
-          }
-          std::push_heap(neighborEntities.begin(), neighborEntities.end());
-          maxDistanceWithin = neighborEntities.front().Distance;
-        }
-      }
-    }
-
-    static inline constexpr std::vector<TEntityID> ConvertEntityDistanceToList(std::vector<EntityDistance>& neighborEntities, std::size_t neighborNo) noexcept
-    {
-      auto entityIDs = std::vector<TEntityID>();
-      if (neighborEntities.empty())
-        return entityIDs;
-
-      if (neighborEntities.size() < neighborNo)
-        std::sort(neighborEntities.begin(), neighborEntities.end());
-      else
-        std::sort_heap(neighborEntities.begin(), neighborEntities.end());
-
-      auto const entityNo = neighborEntities.size();
-      entityIDs.resize(entityNo);
-      for (std::size_t i = 0; i < entityNo; ++i)
-        entityIDs[i] = neighborEntities[i].EntityID;
-
-      return entityIDs;
-    }
-
-    inline constexpr IGM::Geometry GetNodeWallDistance(
-      TVector const& searchPoint, MortonNodeIDCR key, [[maybe_unused]] Node const& node, bool isInsideConsideredAsZero) const noexcept
-    {
-      auto const depthID = SI::GetDepthID(key);
-      auto const& halfSize = this->GetNodeSize(depthID + 1);
-      auto const& centerPoint = GetNodeCenterMacro(this, key, node);
-      return IGM::GetBoxWallDistanceAD(searchPoint, centerPoint, halfSize, isInsideConsideredAsZero);
-    }
-
-    void VisitNodesInDFSWithChildrenEdit(
-      depth_t stackID, std::pair<Node const*, TGeometry> const& nodeWithDistance, auto const& procedure, auto const& childNodeKeyEditor) const noexcept
-    {
-      if (!procedure(nodeWithDistance))
-        return;
-
-      auto const childStackID = stackID + 1;
-      for (auto const& childNodeWithDistance : childNodeKeyEditor(nodeWithDistance.first->GetChildren(), stackID))
-        this->VisitNodesInDFSWithChildrenEdit(childStackID, childNodeWithDistance, procedure, childNodeKeyEditor);
-    }
-
-  public:
-    // Get K Nearest Neighbor sorted by distance (point distance should be less than maxDistanceWithin, it is used as a Tolerance check)
-    std::vector<TEntityID> GetNearestNeighbors(
-      TVector const& searchPoint, std::size_t neighborNo, TGeometry maxDistanceWithin, TContainer const& points) const noexcept
-    {
-      auto neighborEntities = std::vector<EntityDistance>();
-      neighborEntities.reserve(neighborNo);
-
-      auto smallestNodeKey = this->FindSmallestNodeKey(this->template GetNodeID<true>(searchPoint));
-      if (!SI::IsValidKey(smallestNodeKey))
-        smallestNodeKey = SI::GetRootKey();
-
-      auto farestEntityDistance = maxDistanceWithin;
-      // Parent checks (in a usual case parents do not have entities)
-      for (auto nodeKey = smallestNodeKey; SI::IsValidKey(nodeKey); nodeKey = SI::GetParentKey(nodeKey))
-        AddEntityDistance(this->GetNodeEntities(nodeKey), searchPoint, points, neighborEntities, neighborNo, farestEntityDistance);
-
-      this->VisitNodesInPriorityOrder(
-        SI::GetRootKey(),
-        [&](Node const& node, TGeometry nodeDistance) -> Base::TraverseControl {
-          if (nodeDistance > farestEntityDistance * (1.0 + std::numeric_limits<TGeometry>::epsilon()))
-            return Base::TraverseControl::Terminate;
-
-          // Skip already visited parent nodes
-          if (smallestNodeKey == node.GetKey() || SI::IsParentKey(smallestNodeKey, node.GetKey()))
-            return Base::TraverseControl::Continue;
-
-          AddEntityDistance(this->GetNodeEntities(node), searchPoint, points, neighborEntities, neighborNo, farestEntityDistance);
-          return Base::TraverseControl::Continue;
-        },
-        [&](Node const& node) -> std::optional<TGeometry> {
-          auto wallDistance = this->GetNodeWallDistance(searchPoint, node.GetKey(), node, true);
-          if (wallDistance > farestEntityDistance * (1.0 + std::numeric_limits<TGeometry>::epsilon()))
-            return std::nullopt;
-
-          return wallDistance;
-        });
-
-      return ConvertEntityDistanceToList(neighborEntities, neighborNo);
-    }
-
-    // Get K Nearest Neighbor sorted by distance
-    inline std::vector<TEntityID> GetNearestNeighbors(TVector const& searchPoint, std::size_t neighborNo, TContainer const& points) const noexcept
-    {
-      return this->GetNearestNeighbors(searchPoint, neighborNo, std::numeric_limits<TGeometry>::max(), points);
-    }
   };
 
 
@@ -4683,6 +4890,7 @@ namespace OrthoTree
 
     using TGeometry = TGeometry_;
     using IGM_Geometry = typename IGM::Geometry;
+    using FPGeometry = typename Base::FPGeometry;
     using TVector = TVector_;
     using TBox = TBox_;
     using TRay = TRay_;
@@ -5394,9 +5602,10 @@ namespace OrthoTree
       [[maybe_unused]] auto const pLeftTree = &leftTree;
       [[maybe_unused]] auto const pRightTree = &rightTree;
       auto nodePairToProceed = std::queue<ParentIteratorArray>{};
-      nodePairToProceed.push({
-        NodeIteratorAndStatus{  leftTree.m_nodes.find(rootKey), false },
-        NodeIteratorAndStatus{ rightTree.m_nodes.find(rootKey), false }
+      nodePairToProceed.push(
+        {
+          NodeIteratorAndStatus{  leftTree.m_nodes.find(rootKey), false },
+          NodeIteratorAndStatus{ rightTree.m_nodes.find(rootKey), false }
       });
       for (; !nodePairToProceed.empty(); nodePairToProceed.pop())
       {
@@ -6056,6 +6265,30 @@ namespace OrthoTree
       std::optional<std::function<std::optional<TGeometry>(TEntityID)>> entityHitTester = std::nullopt) const noexcept
     {
       return RayIntersectedFirst(AD::GetRayOrigin(ray), AD::GetRayDirection(ray), boxes, tolerance, toleranceIncrement, maxDistance, entityHitTester);
+    }
+
+    // Get K Nearest Neighbor sorted by distance (point distance should be less than maxDistanceWithin, it is used as a Tolerance check)
+    std::vector<TEntityID> GetNearestNeighbors(
+      TVector const& searchPoint,
+      std::size_t neighborNo,
+      TGeometry maxDistanceWithin,
+      TContainer const& entities,
+      FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon(),
+      std::optional<typename Base::EntityDistanceFn> const& entityDistanceFn = std::nullopt) const noexcept
+    {
+      static_assert(!DO_SPLIT_PARENT_ENTITIES, "GetNearestNeighbors() is not supported for split strategy!");
+      return Base::GetNearestNeighbors(searchPoint, neighborNo, maxDistanceWithin, entities, tolerance, entityDistanceFn);
+    }
+
+    // Get K Nearest Neighbor sorted by distance
+    std::vector<TEntityID> GetNearestNeighbors(
+      TVector const& searchPoint,
+      std::size_t neighborNo,
+      TContainer const& entities,
+      FPGeometry tolerance = std::numeric_limits<FPGeometry>::epsilon(),
+      std::optional<typename Base::EntityDistanceFn> const& entityDistanceFn = std::nullopt) const noexcept
+    {
+      return this->GetNearestNeighbors(searchPoint, neighborNo, std::numeric_limits<TGeometry>::max(), entities, tolerance, entityDistanceFn);
     }
   };
 
