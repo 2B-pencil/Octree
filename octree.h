@@ -2272,6 +2272,18 @@ namespace OrthoTree
       static inline bool IsValidKey(NonLinearLocationID const& key) noexcept { return key.any(); }
 
       static inline constexpr NodeID GetParentKey(NodeIDCR key) noexcept { return key >> DIMENSION_NO; }
+      static inline constexpr bool IsParentKey(NodeIDCR childKey, NodeIDCR possibleAncestorKey) noexcept
+      {
+        auto const childDepth = GetDepthID(childKey);
+        auto const ancestorDepth = GetDepthID(possibleAncestorKey);
+
+        if (ancestorDepth >= childDepth)
+          return false;
+
+        const auto shift = (childDepth - ancestorDepth) * DIMENSION_NO;
+
+        return (childKey >> shift) == possibleAncestorKey;
+      }
 
       static inline constexpr LocationID GetParentGridID(LocationIDCR locationID) noexcept { return locationID >> DIMENSION_NO; }
 
@@ -3665,7 +3677,6 @@ namespace OrthoTree
           return;
       }
 
-
       auto nodesToProceed = std::priority_queue<PrioritizedNode, std::vector<PrioritizedNode>, std::greater<PrioritizedNode>>();
       nodesToProceed.push({ rootNodeID, GetValue(nodePriority) });
       while (!nodesToProceed.empty())
@@ -4605,57 +4616,26 @@ namespace OrthoTree
       for (auto nodeKey = smallestNodeKey; SI::IsValidKey(nodeKey); nodeKey = SI::GetParentKey(nodeKey))
         AddEntityDistance(this->GetNodeEntities(nodeKey), searchPoint, points, neighborEntities, neighborNo, farestEntityDistance);
 
-      // Search in itself and the children
-      auto childrenDistanceStack = std::vector<std::vector<std::pair<Node const*, TGeometry>>>(this->GetMaxDepthID());
-      for (auto nodeKey = smallestNodeKey, prevNodeKey = MortonNodeID{}; SI::IsValidKey(nodeKey);
-           prevNodeKey = nodeKey, nodeKey = SI::GetParentKey(nodeKey))
-      {
-        auto const node = this->GetNode(nodeKey);
-        auto const wallDistance = this->GetNodeWallDistance(searchPoint, nodeKey, node, false);
-        this->VisitNodesInDFSWithChildrenEdit(
-          0,
-          { &node, wallDistance },
-          [&](std::pair<Node const*, TGeometry> const& nodeDistance) {
-            auto const& [childNode, childNodeDistance] = nodeDistance;
-            auto const childNodeKey = childNode->GetKey();
-            if (childNodeKey == nodeKey)
-              return true; // Self check was already done.
+      this->VisitNodesInPriorityOrder(
+        SI::GetRootKey(),
+        [&](Node const& node, TGeometry nodeDistance) -> Base::TraverseControl {
+          if (nodeDistance > farestEntityDistance * (1.0 + std::numeric_limits<TGeometry>::epsilon()))
+            return Base::TraverseControl::Terminate;
 
-            if (childNodeKey == prevNodeKey)
-              return false; // Previous subtree was already checked.
+          // Skip already visited parent nodes
+          if (smallestNodeKey == node.GetKey() || SI::IsParentKey(smallestNodeKey, node.GetKey()))
+            return Base::TraverseControl::Continue;
 
-            if (childNodeDistance > farestEntityDistance)
-              return false;
+          AddEntityDistance(this->GetNodeEntities(node), searchPoint, points, neighborEntities, neighborNo, farestEntityDistance);
+          return Base::TraverseControl::Continue;
+        },
+        [&](Node const& node) -> std::optional<TGeometry> {
+          auto wallDistance = this->GetNodeWallDistance(searchPoint, node.GetKey(), node, true);
+          if (wallDistance > farestEntityDistance * (1.0 + std::numeric_limits<TGeometry>::epsilon()))
+            return std::nullopt;
 
-            AddEntityDistance(this->GetNodeEntities(*childNode), searchPoint, points, neighborEntities, neighborNo, farestEntityDistance);
-            return true;
-          },
-          [&](auto const& children, depth_t stackID) -> std::span<std::pair<Node const*, TGeometry>> {
-            if (children.empty())
-              return {};
-
-            auto& childrenDistance = childrenDistanceStack[stackID];
-            childrenDistance.clear();
-            for (MortonNodeIDCR childNodeKey : children)
-            {
-              auto const& childNode = this->m_nodes.at(childNodeKey);
-              auto const wallDistance = this->GetNodeWallDistance(searchPoint, childNodeKey, childNode, true);
-              if (wallDistance > farestEntityDistance)
-                continue;
-
-              childrenDistance.emplace_back(&childNode, wallDistance);
-            }
-
-            std::sort(childrenDistance.begin(), childrenDistance.end(), [&](auto const& leftDistance, auto const& rightDistance) {
-              return leftDistance.second < rightDistance.second;
-            });
-
-            return std::span(childrenDistance);
-          });
-
-        if (farestEntityDistance < wallDistance)
-          break;
-      }
+          return wallDistance;
+        });
 
       return ConvertEntityDistanceToList(neighborEntities, neighborNo);
     }
