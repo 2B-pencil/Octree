@@ -5878,7 +5878,7 @@ namespace OrthoTree
 
   public:
     // Get all entities that are intersected by the ray in order
-    template<bool SHOULD_SORT_ENTITY_BY_DISTANCE = true>
+    template<bool SHOULD_SORT_ENTITIES_BY_DISTANCE = true>
     std::vector<TEntityID> RayIntersectedAll(
       TVector const& rayBasePoint,
       TVector const& rayHeading,
@@ -5893,7 +5893,7 @@ namespace OrthoTree
         return {};
 
       using UniqueEntityDistanceContainer = std::conditional_t<
-        SHOULD_SORT_ENTITY_BY_DISTANCE,
+        SHOULD_SORT_ENTITIES_BY_DISTANCE,
         std::conditional_t<DO_SPLIT_PARENT_ENTITIES, std::unordered_set<EntityDistance, EntityDistanceHash, EntityDistanceEq>, std::vector<EntityDistance>>,
         std::conditional_t<DO_SPLIT_PARENT_ENTITIES, std::unordered_set<TEntityID>, std::vector<TEntityID>>>;
 
@@ -5901,11 +5901,11 @@ namespace OrthoTree
       foundEntities.reserve(20);
       GetRayIntersectedAllRecursive(0, SI::GetRootKey(), boxes, *boxRayHitTester, maxExaminationDistance, entityRayHitTester, foundEntities);
 
-      if constexpr (!SHOULD_SORT_ENTITY_BY_DISTANCE && !DO_SPLIT_PARENT_ENTITIES)
+      if constexpr (!SHOULD_SORT_ENTITIES_BY_DISTANCE && !DO_SPLIT_PARENT_ENTITIES)
       {
         return foundEntities;
       }
-      else if constexpr (SHOULD_SORT_ENTITY_BY_DISTANCE && DO_SPLIT_PARENT_ENTITIES)
+      else if constexpr (SHOULD_SORT_ENTITIES_BY_DISTANCE && DO_SPLIT_PARENT_ENTITIES)
       {
         std::vector<EntityDistance> sortedEntities;
         sortedEntities.reserve(foundEntities.size());
@@ -5924,7 +5924,7 @@ namespace OrthoTree
       {
         auto const beginIteratorOfEntities = foundEntities.begin();
         auto const endIteratorOfEntities = foundEntities.end();
-        if constexpr (SHOULD_SORT_ENTITY_BY_DISTANCE)
+        if constexpr (SHOULD_SORT_ENTITIES_BY_DISTANCE)
         {
           std::sort(beginIteratorOfEntities, endIteratorOfEntities);
 
