@@ -3630,7 +3630,15 @@ namespace OrthoTree
         VisitNodesInDFS(childKey, procedure, selector);
     }
 
-    void VisitNodeInPriorityOrder(MortonNodeIDCR rootNodeID, auto&& procedure, auto&& priorityCalculator) const noexcept
+    // TraverseControl is the result type of node-visitor functions' procedure.
+    enum class TraverseControl
+    {
+      Terminate,    // Terminates the traverse
+      SkipChildren, // Skips children nodes
+      Continue      // Continues the traverse
+    };
+
+    constexpr void VisitNodesInPriorityOrder(MortonNodeIDCR rootNodeID, auto&& procedure, auto&& priorityCalculator) const noexcept
     {
       using TPriorityResult = std::invoke_result_t<decltype(priorityCalculator), Node>;
       using TPriority = std::conditional_t<detail::IsStdOptionalV<TPriorityResult>, typename TPriorityResult::value_type, TPriorityResult>;
@@ -3665,8 +3673,13 @@ namespace OrthoTree
         auto const [nodeID, priority] = nodesToProceed.top();
         nodesToProceed.pop();
 
-        if (!procedure(this->GetNodeEntities(nodeID), priority))
-          return;
+        auto const control = procedure(GetNode(nodeID), priority);
+        switch (control)
+        {
+        case TraverseControl::Terminate: return;
+        case TraverseControl::SkipChildren: continue;
+        case TraverseControl::Continue: break;
+        }
 
         auto const& node = GetNode(nodeID);
         for (MortonNodeIDCR childNodeID : node.GetChildren())
@@ -5977,13 +5990,13 @@ namespace OrthoTree
       // max-heap by enterDistance (largest enterDistance at top)
       auto maxDistanceHeap = std::priority_queue<Candidate, std::vector<Candidate>>{};
       auto maxExaminationDistance = IGM_Geometry(maxDistance);
-      this->VisitNodeInPriorityOrder(
+      this->VisitNodesInPriorityOrder(
         SI::GetRootKey(),
-        [&, boxPicker = *boxRayHitTester](const auto& nodeEntities, TGeometry nodeEnterDistance) {
+        [&, boxPicker = *boxRayHitTester](const auto& node, TGeometry nodeEnterDistance) {
           if (nodeEnterDistance > maxExaminationDistance)
-            return false;
+            return Base::TraverseControl::Terminate;
 
-          for (auto const entityID : nodeEntities)
+          for (auto const entityID : this->GetNodeEntities(node))
           {
             auto boxResult = boxPicker.Hit(detail::at(boxes, entityID));
             if (!boxResult)
@@ -6019,7 +6032,7 @@ namespace OrthoTree
               maxDistanceHeap.pop();
           }
 
-          return true;
+          return Base::TraverseControl::Continue;
         },
         [&, boxPicker = *boxRayHitTester](auto const& node) -> std::optional<TGeometry> {
           auto result = boxPicker.Hit(GetNodeCenterMacro(this, node.GetKey(), node), this->GetNodeSize(SI::GetDepthID(node.GetKey()) + 1));
